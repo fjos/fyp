@@ -293,16 +293,3 @@ void distCL::distCL_Finalize()
         ierr = MPI_Finalize();
     }
 }
-
-
-
-
-
-// template <typename data_type> data_barrier<data_type>  distCL::create_barrier(const std::initializer_list<int> &target_machines, int size_x, int granularity)
-// {
-//     if(my_id_in_list(target_machines, my_id))
-//     {
-//         return data_barrier<data_type>(size_x, granularity);
-//     }
-//     return data_barrier<data_type>();
-// }
