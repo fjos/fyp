@@ -4,6 +4,7 @@ static MPI_Datatype convert_type(MPI_Data_Abstraction::Data_Type type)
 {
     switch (type)
     {
+        case MPI_Data_Abstraction::type_unknown: throw std::runtime_error("MPI_Datatype convert_type(MPI_Data_Abstraction::Data_Type) unkown Data_Type");
         case MPI_Data_Abstraction::type_bool: return MPI::BOOL;
         case MPI_Data_Abstraction::type_char: return MPI::CHAR;
         case MPI_Data_Abstraction::type_unsigned_char: return MPI::UNSIGNED_CHAR;
