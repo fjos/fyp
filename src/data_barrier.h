@@ -27,18 +27,7 @@ typedef struct distCL_event_list
 } distCL_event_list;
 
 
-bool my_id_in_list(const init_list &shared_machine_list, int my_id)
-{
-    for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
-    {
-        if (*i == my_id)
-        {
-            return true;
-        }
-    }
 
-    return false;
-}
 
 template <typename data_type> class data_barrier
 {
@@ -223,11 +212,6 @@ template <typename data_type> void send_thread(std::shared_ptr<distCL_event> eve
                          MPI_COMM_WORLD,
                          &event_mpi.back());
     }
-
-  
-
-    clSetUserEventStatus(*event->event_temp.get(), CL_COMPLETE);
-
 }
 
 template <typename data_type> void data_barrier<data_type>::send_data(std::shared_ptr<distCL_event> send_event, int target_machine, int offset, int chunks_sent)
@@ -238,7 +222,7 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
         chunks_to_send.push_back(chunk_id);
     }
 
-    std::thread t(send_thread<data_type>,
+    send_event.get()->event_thread.push_back(std::thread(send_thread<data_type>,
                   send_event,
                   data,
                   previous_data,
@@ -247,8 +231,7 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
                   chunk_size,
                   machine_id,
                   chunks_to_send,
-                  target_machine);
-    t.detach();
+                  target_machine));
 }
 
 template <typename data_type> void receive_thread(data_type *data, int message_tag, int number_chunks, int chunk_size, int source_machine, int machine_id)

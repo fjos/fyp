@@ -1,5 +1,4 @@
 #include "distributedCL.h"
-#include <unistd.h>
 namespace distCL
 {
 
@@ -181,34 +180,12 @@ template <typename data_type> cl_int EnqueueReadBuffer(cl_command_queue command_
 
                 if (*target_machine != barrier->machine_id)
                 {
-                    // distCL_event send_event;
-                    // barrier->send_data(&send_event, *target_machine, chunk_offset, chunks_sent);
-
                     std::shared_ptr<distCL_event> send_event(new distCL_event);
                     send_list->events.push_back(send_event);
 
-                    cl_int errcode_ret;
-
                     send_list->events.back()->lock = lock;
-                    send_list->events.back()->event_temp = std::make_shared<cl_event>();
-
                     barrier->send_data(send_list->events.back(), *target_machine, chunk_offset, chunks_sent);
                 }
-                // // else
-                // // {
-
-                // std::shared_ptr<distCL_event> send_event(new distCL_event);
-
-                // send_event->lock = lock;
-                // send_event->event_temp = std::make_shared<cl_event>();
-
-
-                // barrier->send_data(send_event, *target_machine, chunk_offset, chunks_sent);
-
-                // // printf("sent to %d\n", *target_machine);
-                // distCL::wait_for_distCL_event(send_event);
-                // send_event.reset();
-                // // }
             }
         }
         else
@@ -225,8 +202,6 @@ template <typename data_type> cl_int EnqueueReadBuffer(cl_command_queue command_
                     temp_list.events.push_back(send_event);
 
                     temp_list.events.back()->lock = lock;
-                    temp_list.events.back()->event_temp.reset(new cl_event);
-
                     barrier->send_data(temp_list.events.back(), *target_machine, chunk_offset, chunks_sent);
                 }
             }
@@ -305,53 +280,23 @@ void wait_for_distCL_event(std::shared_ptr<distCL_event> event)
     }
     if (event->lock != NULL)
     {
-        // while(!event->lock.unique())
-        // {}
         event->lock.reset();
 
     }
 }
 
-// void enqueueWriteBuffer(data_barrier *barrier, int source_machine, init_list target_machines)
-// {
+bool my_id_in_list(const init_list &shared_machine_list, int my_id)
+{
+    for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
+    {
+        if (*i == my_id)
+        {
+            return true;
+        }
+    }
 
-//     check_source_and_target_valid(barrier->shared_machine_list, target_machines, source_machine);
-
-//     if (barrier.machine_id == source_machine)
-//     {
-//         for (auto target_machine = begin(target_machines);
-//                 target_machine < end(target_machines);
-//                 ++target_machine)
-//         {
-//             if (target_machine == barrier.machine_id)
-//             {
-//                 //CL FUNCTION CALL
-
-//             }
-//             else
-//             {
-//                 barrier.send_data(target_machine);
-//             }
-//         }
-//     }
-//     else
-//     {
-//         for (auto target_machine = begin(target_machines);
-//                 target_machine < end(target_machines); ++target_machine)
-//         {
-//             if (target_machine != barrier.machine_id)
-//             {
-//                 distCL recv_request;
-//                 barrier.receive_data(&recv_request, source_machine);
-//                 wait_for_distCL_event(&recv_request);
-
-//                 //CL FUNCTION CALL
-//             }
-//         }
-//     }
-// }
-
-
+    return false;
+}
 
 void check_source_and_target_valid(init_list shared_machine_list, init_list target_machines, int source_machine)
 {
