@@ -1,5 +1,6 @@
 #include <mpi.h>
 #include <vector>
+#include <list>
 #include <sstream>
 #include <iostream>
 #include <thread>
@@ -11,28 +12,22 @@
 
 #define init_list std::initializer_list<int>
 
-typedef struct distCL_request
+typedef struct distCL_event
 {
-    std::vector<std::thread> request_thread;
-    std::vector<MPI_Request> request_mpi;
-} distCL_request;
+    std::vector<std::thread> event_thread;
+    std::vector<MPI_Request> event_mpi;
 
+    std::shared_ptr<cl_event> event_temp;
+    std::shared_ptr<cl_event> lock;
+} distCL_event;
 
-void wait_for_distCL_request(distCL_request *request)
+typedef struct distCL_event_list
 {
-    while (!request->request_mpi.empty())
-    {
-        MPI_Wait(&request->request_mpi.back(), MPI_STATUS_IGNORE);
-        request->request_mpi.pop_back();
-    }
-    while (!request->request_thread.empty())
-    {
-        request->request_thread.back().join();
-        request->request_thread.pop_back();
-    }
-}
+    std::list<std::shared_ptr<distCL_event>> events;
+} distCL_event_list;
 
-bool my_id_in_list(const std::initializer_list<int> &shared_machine_list, int my_id)
+
+bool my_id_in_list(const init_list &shared_machine_list, int my_id)
 {
     for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
     {
@@ -61,7 +56,7 @@ public:
     data_barrier(const init_list &shared_machine_list, int size_x, int granularity, int tag_value, int id);
     virtual ~data_barrier();
 
-    void sync_barrier(distCL_request *request);
+    void sync_barrier(distCL_event_list *send_list, distCL_event_list *recv_list);
     void dumpData(bool show_data, bool show_stats)
     {
         std::stringstream output;
@@ -91,9 +86,13 @@ public:
         std::cout << output.str();
     }
 
-    void send_data(distCL_request *request, std::vector<int> chunks_to_send, int target_machine);
-    void send_data(distCL_request *request, int target_machine);
-    void receive_data(distCL_request *request, int source_machine);
+    void send_data(distCL_event *request, std::vector<int> chunks_to_send, int target_machine);
+    void send_data(distCL_event *request, int target_machine);
+    void send_data(distCL_event *request, int target_machine, int offset, int chunks_sent);
+    void send_data(std::shared_ptr <distCL_event> send_event, int target_machine, int offset, int chunks_sent);
+    void receive_data(std::shared_ptr<distCL_event> recv_event, int source_machine);
+    void receive_data(std::shared_ptr<distCL_event> recv_event, int source_machine, std::shared_ptr<cl_event> event);
+
     // void receive_data(int source_machine);
 };
 
@@ -116,19 +115,19 @@ template <typename data_type> data_barrier<data_type>::~data_barrier()
     delete []previous_data;
 }
 
-template <typename data_type> void data_barrier<data_type>::send_data(distCL_request *request, std::vector<int> chunks_to_send, int target_machine)
+template <typename data_type> void data_barrier<data_type>::send_data(distCL_event *request, std::vector<int> chunks_to_send, int target_machine)
 {
     int ierr;
     unsigned chunk_list_size = chunks_to_send.size();
     MPI_Request new_request;
 
 
-    request->request_mpi.push_back(new_request);
-    ierr = MPI_Isend(&chunk_list_size, 1, MPI_UNSIGNED, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + number_chunks, MPI_COMM_WORLD, &request->request_mpi.back());
+    request->event_mpi.push_back(new_request);
+    ierr = MPI_Isend(&chunk_list_size, 1, MPI_UNSIGNED, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + number_chunks, MPI_COMM_WORLD, &request->event_mpi.back());
     //IERR CATCH
 
-    request->request_mpi.push_back(new_request);
-    ierr = MPI_Isend(&chunks_to_send.front(), chunk_list_size, MPI_INT, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE +  message_tag + number_chunks + 1, MPI_COMM_WORLD, &request->request_mpi.back());
+    request->event_mpi.push_back(new_request);
+    ierr = MPI_Isend(&chunks_to_send.front(), chunk_list_size, MPI_INT, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE +  message_tag + number_chunks + 1, MPI_COMM_WORLD, &request->event_mpi.back());
     //IERR CATCH
 
     while (!chunks_to_send.empty())
@@ -139,12 +138,35 @@ template <typename data_type> void data_barrier<data_type>::send_data(distCL_req
         std::copy(data + chunk_id * chunk_size,
                   data + (chunk_id + 1)*chunk_size,
                   previous_data + chunk_id * chunk_size);
-        request->request_mpi.push_back(new_request);
-        ierr = MPI_Isend(data + chunk_id * chunk_size, chunk_size, convert_type(get_abstraction_data_type<data_type>()), target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + chunk_id, MPI_COMM_WORLD, &request->request_mpi.back());
+        request->event_mpi.push_back(new_request);
+
+        ierr = MPI_Isend(data + chunk_id * chunk_size,
+                         chunk_size,
+                         convert_type(get_abstraction_data_type<data_type>()),
+                         target_machine,
+                         machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + chunk_id,
+                         MPI_COMM_WORLD,
+                         &request->event_mpi.back());
     }
 }
 
-template <typename data_type> void data_barrier<data_type>::send_data(distCL_request *request, int target_machine)
+
+template <typename data_type> void data_barrier<data_type>::send_data(distCL_event *send_event, int target_machine, int offset, int chunks_sent)
+{
+    if (offset + chunks_sent > number_chunks)
+        std::runtime_error("offset + chunks_sent value out of bounds");
+
+    std::vector<int> chunks_to_send;
+    for (int chunk_id = offset; chunk_id < offset + chunks_sent; ++chunk_id)
+    {
+        chunks_to_send.push_back(chunk_id);
+    }
+
+
+    send_data(send_event, chunks_to_send, target_machine);
+}
+
+template <typename data_type> void data_barrier<data_type>::send_data(distCL_event *send_event, int target_machine)
 {
     std::vector<int> chunks_to_send;
     for (int chunk_id = 0; chunk_id < number_chunks; ++chunk_id)
@@ -152,7 +174,81 @@ template <typename data_type> void data_barrier<data_type>::send_data(distCL_req
         chunks_to_send.push_back(chunk_id);
     }
 
-    send_data(&request, chunks_to_send, target_machine);
+    send_data(send_event, chunks_to_send, target_machine);
+}
+
+template <typename data_type> void send_thread(std::shared_ptr<distCL_event> event,
+        data_type *data,
+        data_type *previous_data,
+        int message_tag,
+        int number_chunks,
+        int chunk_size,
+        int machine_id,
+        std::vector<int> chunks_to_send,
+        int target_machine)
+{
+    clWaitForEvents(1, event->lock.get());
+
+
+
+    int ierr;
+    unsigned chunk_list_size = chunks_to_send.size();
+    MPI_Request new_request;
+
+    std::vector<MPI_Request> event_mpi;
+    event_mpi.push_back(new_request);
+    ierr = MPI_Isend(&chunk_list_size, 1, MPI_UNSIGNED, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + number_chunks, MPI_COMM_WORLD, &event_mpi.back());
+    //IERR CATCH
+
+    event_mpi.push_back(new_request);
+    ierr = MPI_Isend(&chunks_to_send.front(), chunk_list_size, MPI_INT, target_machine, machine_id * SEND_MACHINE + target_machine * RECV_MACHINE +  message_tag + number_chunks + 1, MPI_COMM_WORLD, &event_mpi.back());
+    //IERR CATCH
+
+
+    while (!chunks_to_send.empty())
+    {
+        int chunk_id = chunks_to_send.back();
+        chunks_to_send.pop_back();
+
+        // std::copy(data + chunk_id * chunk_size,
+        //           data + (chunk_id + 1)*chunk_size,
+        //           previous_data + chunk_id * chunk_size);
+        event_mpi.push_back(new_request);
+
+        ierr = MPI_Isend(data + chunk_id * chunk_size,
+                         chunk_size,
+                         convert_type(get_abstraction_data_type<data_type>()),
+                         target_machine,
+                         machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + chunk_id,
+                         MPI_COMM_WORLD,
+                         &event_mpi.back());
+    }
+
+  
+
+    clSetUserEventStatus(*event->event_temp.get(), CL_COMPLETE);
+
+}
+
+template <typename data_type> void data_barrier<data_type>::send_data(std::shared_ptr<distCL_event> send_event, int target_machine, int offset, int chunks_sent)
+{
+    std::vector<int> chunks_to_send;
+    for (int chunk_id = offset; chunk_id < (offset+chunks_sent); ++chunk_id)
+    {
+        chunks_to_send.push_back(chunk_id);
+    }
+
+    std::thread t(send_thread<data_type>,
+                  send_event,
+                  data,
+                  previous_data,
+                  message_tag,
+                  number_chunks,
+                  chunk_size,
+                  machine_id,
+                  chunks_to_send,
+                  target_machine);
+    t.detach();
 }
 
 template <typename data_type> void receive_thread(data_type *data, int message_tag, int number_chunks, int chunk_size, int source_machine, int machine_id)
@@ -177,46 +273,86 @@ template <typename data_type> void receive_thread(data_type *data, int message_t
     }
 }
 
-template <typename data_type> void data_barrier<data_type>::receive_data(distCL_request *request, int source_machine)
+template <typename data_type> void data_barrier<data_type>::receive_data(std::shared_ptr<distCL_event> recv_event, int source_machine)
 {
-    request->request_thread.push_back(std::thread(receive_thread<data_type>, data, message_tag, number_chunks, chunk_size, source_machine, machine_id));
+    recv_event.get()->event_thread.push_back(std::thread(receive_thread<data_type>, data, message_tag, number_chunks, chunk_size, source_machine, machine_id));
 }
 
 
-template <typename data_type> void data_barrier<data_type>::sync_barrier(distCL_request *request)
+template <typename data_type> void receive_thread_event(data_type *data, int message_tag, int number_chunks, int chunk_size, int source_machine, int machine_id, std::shared_ptr<cl_event> event)
 {
-    if (my_id_in_list(shared_machine_list, machine_id))
+    int ierr;
+    unsigned chunk_list_size = 0;
+
+    MPI_Status status;
+    ierr = MPI_Recv(&chunk_list_size, 1, MPI_UNSIGNED, source_machine, source_machine * SEND_MACHINE + machine_id * RECV_MACHINE + message_tag + number_chunks, MPI_COMM_WORLD, &status);
+    //IERR CATCH
+
+    std::vector<int> chunks_to_receive(chunk_list_size);
+    ierr = MPI_Recv(&chunks_to_receive[0], chunk_list_size, MPI_INT, source_machine, source_machine * SEND_MACHINE + machine_id * RECV_MACHINE + message_tag + number_chunks + 1, MPI_COMM_WORLD, &status);
+    //IERR CATCH
+
+
+    while (!chunks_to_receive.empty())
     {
-        std::vector<int> chunks_changed;
-        for (int chunk_id = 0; chunk_id < number_chunks; ++chunk_id)
-        {
-            bool chunk_changed = false;
-            for (int offset = 0; offset < chunk_size; ++offset)
-            {
-                if (data[chunk_id * chunk_size + offset] != previous_data[chunk_id * chunk_size + offset])
-                {
-                    chunk_changed = true;
-                }
-            }
-            if (chunk_changed)
-            {
-                chunks_changed.push_back(chunk_id);
-            }
-        }
-        for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
-        {
-            if (*i != machine_id)
-            {
-                send_data(request, chunks_changed, *i);
-            }
-        }
-        for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
-        {
-            if (*i != machine_id)
-            {
-                receive_data(request, *i);
-            }
-        }
+        int chunk_id = chunks_to_receive.back();
+        chunks_to_receive.pop_back();
+        ierr = MPI_Recv(data + chunk_id * chunk_size, chunk_size, convert_type(get_abstraction_data_type<data_type>()), source_machine, source_machine * SEND_MACHINE + machine_id * RECV_MACHINE + message_tag + chunk_id, MPI_COMM_WORLD, &status);
     }
+    clSetUserEventStatus(*event.get(), CL_COMPLETE);
+
 }
+
+template <typename data_type> void data_barrier<data_type>::receive_data(std::shared_ptr<distCL_event> recv_event, int source_machine, std::shared_ptr<cl_event> event)
+{
+    recv_event.get()->event_thread.push_back(std::thread(receive_thread_event<data_type>, data, message_tag, number_chunks, chunk_size, source_machine, machine_id, event));
+}
+
+
+
+// template <typename data_type> void data_barrier<data_type>::sync_barrier(distCL_event_list *send_list, distCL_event_list *recv_list)
+// {
+//     if (my_id_in_list(shared_machine_list, machine_id))
+//     {
+
+//         std::vector<int> chunks_changed;
+//         for (int chunk_id = 0; chunk_id < number_chunks; ++chunk_id)
+//         {
+//             bool chunk_changed = false;
+//             for (int offset = 0; offset < chunk_size; ++offset)
+//             {
+//                 if (data[chunk_id * chunk_size + offset] != previous_data[chunk_id * chunk_size + offset])
+//                 {
+//                     chunk_changed = true;
+//                 }
+//             }
+//             if (chunk_changed)
+//             {
+//                 chunks_changed.push_back(chunk_id);
+//             }
+//         }
+//         for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
+//         {
+//             if (*i != machine_id)
+//             {
+//                 distCL_event send_event;
+//                 send_data(&send_event, chunks_changed, *i);
+//                 // If send_list provided, push event
+//                 if (send_list != NULL)
+//                     send_list->events.push_back(std::move(&send_event));
+//             }
+//         }
+//         for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
+//         {
+//             if (*i != machine_id)
+//             {
+//                 distCL_event recv_event;;
+//                 receive_data(&recv_event, *i);
+//                 // If recv_list provided, push event
+//                 if (recv_list != NULL)
+//                     recv_list->events.push_back(std::move(&recv_event));
+//             }
+//         }
+//     }
+// }
 
