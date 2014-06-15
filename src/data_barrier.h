@@ -16,18 +16,17 @@
 typedef struct distCL_event
 {
     int size;
-    std::shared_ptr<cl_event> *event;
-    // distCL_event() : size(0)
+    std::shared_ptr<cl_event> *events;
+    distCL_event():size(0){};
+    // void setSize(int s)
     // {
-
+    //     size = s;
+    //     event = new std::shared_ptr<cl_event>[size];
     // }
     // ~distCL_event()
     // {
-    //             delete[] event;
-    // }
-    // distCL_event(cl_context context)
-    // {
-    //     *event = new_event;
+    //     if()
+    //     delete [] event;
     // }
 } distCL_event;
 
@@ -42,12 +41,17 @@ public:
     int message_tag;
     int machine_id;
     data_type *data;
-    data_type *previous_data;
+    cl_context context;
+
+    cl_mem buffer;
 
     data_barrier() {};
-    data_barrier(const init_list &shared_machine_list, int size_x, int granularity, int tag_value, int id);
+    data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id);
+    data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context);
+
     virtual ~data_barrier();
 
+    // void sync_barrier(distCL_event_list *send_list, distCL_event_list *recv_list);
     void dumpData(bool show_data, bool show_stats)
     {
         std::stringstream output;
@@ -60,12 +64,6 @@ public:
             }
             output << std::endl;
 
-            output << "Data Previous " << machine_id << " :" << std::endl;
-            for (int i = 0; i < data_size; ++i)
-            {
-                output << previous_data[i] << " ";
-            }
-            output << std::endl;
         }
         if (show_stats == true)
         {
@@ -79,12 +77,14 @@ public:
 
     void send_data(std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
     void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
+    void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent, data_type * data){};
     void receive_data(std::shared_ptr<cl_event> recv_event, int source_machine);
+
     // void receive_data(int source_machine);
 };
 
 
-template <typename data_type> data_barrier<data_type>::data_barrier(const std::initializer_list<int> &machines, int size_x, int granularity, int tag_value, int id)
+template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id)
 {
     data_size = size_x;
     number_chunks = size_x / granularity;
@@ -93,13 +93,24 @@ template <typename data_type> data_barrier<data_type>::data_barrier(const std::i
     machine_id = id;
     shared_machine_list = machines;
     data = new data_type[size_x];
-    previous_data = new data_type[size_x];
 }
+
+template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context)
+{
+    data_size = size_x;
+    number_chunks = size_x / granularity;
+    chunk_size = granularity;
+    message_tag = tag_value;
+    machine_id = id;
+    shared_machine_list = machines;
+    data = new data_type[size_x];
+    context = input_context;
+}
+
 
 template <typename data_type> data_barrier<data_type>::~data_barrier()
 {
     delete []data;
-    delete []previous_data;
 }
 
 template <typename data_type> void send_thread_lock(std::shared_ptr<cl_event> lock,
@@ -147,7 +158,14 @@ template <typename data_type> void send_thread_lock(std::shared_ptr<cl_event> lo
                          MPI_COMM_WORLD,
                          &event_mpi.back());
     }
+    while(!event_mpi.empty())
+    {
+        MPI_Wait(&event_mpi.back(), MPI_STATUS_IGNORE);
+        event_mpi.pop_back();
+    }
     clSetUserEventStatus(*send_event, CL_SUCCESS);
+
+    
 }
 
 
@@ -216,6 +234,11 @@ template <typename data_type> void send_thread(std::shared_ptr<cl_event> send_ev
                          machine_id * SEND_MACHINE + target_machine * RECV_MACHINE + message_tag + chunk_id,
                          MPI_COMM_WORLD,
                          &event_mpi.back());
+    }
+    while(!event_mpi.empty())
+    {
+        MPI_Wait(&event_mpi.back(), MPI_STATUS_IGNORE);
+        event_mpi.pop_back();
     }
     clSetUserEventStatus(*send_event, CL_SUCCESS);
 }
