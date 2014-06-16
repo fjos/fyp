@@ -1,0 +1,49 @@
+\documentclass{article}
+
+\input{headings}
+
+
+\begin{document}
+
+\subfile{tex/titlepage}
+
+\subfile{tex/data_barrier.tex}
+ data barrier
+    -- motivation
+    -- development
+    -- data members
+        -- tag for unique sending, numchunks + 2 reserved
+    -- member functions and usage
+        -- standard suite of initializations, etc
+        -- send functions
+            -- motivation
+            -- development
+                -- originally send a message saying how many chunks will be sent
+                -- recv chunk id
+                -- spawn an actual receive for that data
+                -- receive data
+                -- originally always wanted 1 thread per data barrier waiting to receive
+                    -- due to events this was not feasible
+                --graph o dis fer sure
+                
+            -- components
+            -- block before send
+            -- both block after send
+        -recv function
+            -- motivation
+            -- development
+                -- developed in pair with send, nothing much to say
+
+
+
+\subfile{tex/distCL_event.tex}
+    -- motivation
+    -- development of cl events
+    -- final result and reasoning
+    -- usage in actual code (comparison)
+
+
+
+\bibliographystyle{unsrt}
+    \bibliography{bibliography}
+\end{document}

@@ -57,6 +57,21 @@ public:
                              size_t offset,
                              size_t cb,
                              data_barrier<data_type> *barrier,
+                             size_t barrier_offset,
+                             cl_uint num_events_in_wait_list,
+                             const distCL_event *event_wait_list,
+                             distCL_event *send_event,
+                             distCL_event *recv_event,
+                             int source_machine,
+                             init_list target_machines);
+
+    template <typename data_type>
+    cl_int EnqueueReadBuffer(cl_command_queue command_queue,
+                             cl_mem buffer,
+                             cl_bool blocking_read,
+                             size_t offset,
+                             size_t cb,
+                             data_barrier<data_type> *barrier,
                              cl_uint num_events_in_wait_list,
                              const distCL_event *event_wait_list,
                              distCL_event *send_event,
@@ -263,156 +278,28 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
         int source_machine,
         init_list target_machines)
 {
-    cl_int err = 0;
-    int chunk_offset;
-    int chunks_sent;
-    bool target_self = false;
-
-    check_source_and_target_valid(barrier->shared_machine_list, target_machines, source_machine);
-
-    if (target_machines.size() == 0)
-    {
-        target_machines = barrier->shared_machine_list;
-    }
-
-    if (my_id_in_list(target_machines, my_id) || my_id == source_machine)
-    {
-        err = WaitForEvents(num_events_in_wait_list, event_wait_list, {});
-
-        if (err != CL_SUCCESS)
-        {
-            return err;
-        }
-
-
-
-        if (offset % barrier->chunk_size != 0 || (offset + cb) % barrier->chunk_size != 0 )
-            std::runtime_error("Invalid offset, must align with chunk granularity");
-
-        // Check offset falls within appropriate boundaries.
-        chunk_offset = offset / barrier->chunk_size;
-        chunks_sent = cb / barrier->chunk_size;
-
-        cb *= sizeof(data_type);
-    }
-
-    if (my_id == source_machine)
-    {
-        if (send_event != NULL)
-        {
-            int event_id = 0;
-
-            send_event->size = target_machines.size();
-            send_event->events = new std::shared_ptr<cl_event>[send_event->size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                    send_event->events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(send_event->events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    send_event->size -= 1;
-                    target_self = true;
-
-                }
-            }
-        }
-        else
-        {
-            distCL_event temp_event;
-            int event_id = 0;
-
-            temp_event.size = target_machines.size();
-            temp_event.events = new std::shared_ptr<cl_event>[temp_event.size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-
-                    temp_event.events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(temp_event.events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    temp_event.size -= 1;
-                    target_self = true;
-                }
-            }
-            WaitForEvents(event_id, &temp_event, {});
-            delete [] temp_event.events;
-        }
-        if (target_self == true)
-        {
-            if (recv_event != NULL)
-            {
-                cl_event r_event;
-                err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, barrier->data, 0, NULL, &r_event);
-                recv_event->size = 1;
-                recv_event->events = new std::shared_ptr<cl_event>[1];
-                recv_event->events[0] = std::make_shared<cl_event>(r_event);
-            }
-            else
-            {
-                err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, barrier->data, 0, NULL, NULL);
-            }
-        }
-    }
-    else
-    {
-        for (auto target_machine = begin(target_machines);
-                target_machine < end(target_machines);
-                ++target_machine)
-        {
-
-            if (*target_machine == my_id && *target_machine != source_machine)
-            {
-
-                distCL_event temp_event;
-                temp_event.size = 1;
-                temp_event.events = new std::shared_ptr<cl_event>[1];
-                int errcode_ret;
-                cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                temp_event.events[0] = std::make_shared<cl_event>(new_event);
-
-                barrier->receive_data(temp_event.events[0], source_machine);
-
-                if (recv_event != NULL)
-                {
-                    cl_event r_event;
-                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, barrier->data, 1, temp_event.events[0].get(), &r_event);
-                    recv_event->size = 1;
-                    recv_event->events = new std::shared_ptr<cl_event>[1];
-                    recv_event->events[0] = std::make_shared<cl_event>(r_event);
-
-                }
-                else
-                {
-                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, barrier->data, 1, temp_event.events[0].get(), NULL);
-                }
-                delete [] temp_event.events;
-            }
-        }
-    }
-    return err;
+    return EnqueueWriteBuffer( command_queue,
+                               buffer,
+                               blocking_write,
+                               offset,
+                               cb,
+                               barrier,
+                               0,
+                               num_events_in_wait_list,
+                               event_wait_list,
+                               send_event,
+                               recv_event,
+                               source_machine,
+                               target_machines);
 }
 
+template <typename data_type>
+cl_int internal_send(data_barrier<data_type> *barrier,
+                     size_t chunk_offset,
+                     size_t chunks_sent,
+                     distCL_event *send_event,
+                     int my_id,
+                     init_list target_machines);
 
 template <typename data_type>
 cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
@@ -430,9 +317,8 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
         init_list target_machines)
 {
     cl_int err = 0;
-    int chunk_offset;
-    int chunks_sent;
-    bool target_self = false;
+    size_t chunk_offset;
+    size_t chunks_sent;
 
     check_source_and_target_valid(barrier->shared_machine_list, target_machines, source_machine);
 
@@ -466,78 +352,14 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
     {
         if (send_event != NULL)
         {
-            int event_id = 0;
-
-            send_event->size = target_machines.size();
-            send_event->events = new std::shared_ptr<cl_event>[send_event->size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                    send_event->events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(send_event->events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    send_event->size -= 1;
-                    target_self = true;
-
-                }
-            }
+            err = internal_send(barrier, chunk_offset, chunks_sent, send_event, my_id, target_machines);
         }
         else
         {
             distCL_event temp_event;
-            int event_id = 0;
-
-            temp_event.size = target_machines.size();
-            temp_event.events = new std::shared_ptr<cl_event>[temp_event.size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-
-                    temp_event.events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(temp_event.events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    temp_event.size -= 1;
-                    target_self = true;
-                }
-            }
-            WaitForEvents(event_id, &temp_event, {});
+            err = internal_send(barrier, chunk_offset, chunks_sent, &temp_event, my_id, target_machines);
+            WaitForEvents(1, &temp_event, {});
             delete [] temp_event.events;
-        }
-        if (target_self == true)
-        {
-            if (recv_event != NULL)
-            {
-                cl_event r_event;
-                err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 0, NULL, &r_event);
-                recv_event->size = 1;
-                recv_event->events = new std::shared_ptr<cl_event>[1];
-                recv_event->events[0] = std::make_shared<cl_event>(r_event);
-            }
-            else
-            {
-                err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 0, NULL, NULL);
-            }
         }
     }
     else
@@ -574,9 +396,129 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
                 }
                 delete [] temp_event.events;
             }
+            else if (*target_machine == my_id && *target_machine == source_machine)
+            {
+                if (recv_event != NULL)
+                {
+                    cl_event r_event;
+                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 0, NULL, &r_event);
+                    recv_event->size = 1;
+                    recv_event->events = new std::shared_ptr<cl_event>[1];
+                    recv_event->events[0] = std::make_shared<cl_event>(r_event);
+                }
+                else
+                {
+                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 0, NULL, NULL);
+                }
+
+            }
         }
     }
     return err;
+}
+
+template <typename data_type>
+cl_int internal_send(data_barrier<data_type> *barrier,
+                     size_t chunk_offset,
+                     size_t chunks_sent,
+                     distCL_event *send_event,
+                     int my_id,
+                     init_list target_machines)
+{
+    int event_id = 0;
+    int errcode_ret = CL_SUCCESS;
+
+    send_event->size = target_machines.size();
+    send_event->events = new std::shared_ptr<cl_event>[send_event->size];
+
+    for (auto target_machine = begin(target_machines);
+            target_machine < end(target_machines);
+            ++target_machine)
+    {
+
+        if (*target_machine != my_id)
+        {
+            cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
+            send_event->events[event_id] = std::make_shared<cl_event>(new_event);
+
+            barrier->send_data(send_event->events[event_id], *target_machine, chunk_offset, chunks_sent);
+            event_id++;
+        }
+        else
+        {
+            send_event->size -= 1;
+        }
+    }
+    return errcode_ret;
+}
+
+
+
+
+template <typename data_type>
+cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
+                                        cl_mem buffer,
+                                        cl_bool blocking_read,
+                                        size_t offset,
+                                        size_t cb,
+                                        data_barrier<data_type> *barrier,
+                                        cl_uint num_events_in_wait_list,
+                                        const distCL_event *event_wait_list,
+                                        distCL_event *send_event,
+                                        distCL_event *recv_event,
+                                        int source_machine,
+                                        init_list target_machines)
+{
+    return EnqueueReadBuffer( command_queue,
+                              buffer,
+                              blocking_read,
+                              offset,
+                              cb,
+                              barrier,
+                              0,
+                              num_events_in_wait_list,
+                              event_wait_list,
+                              send_event,
+                              recv_event,
+                              source_machine,
+                              target_machines);
+}
+
+template <typename data_type>
+cl_int internal_send(data_barrier<data_type> *barrier,
+                     size_t chunk_offset,
+                     size_t chunks_sent,
+                     std::shared_ptr<cl_event> lock,
+                     distCL_event *send_event,
+                     int my_id,
+                     init_list target_machines)
+{
+    int event_id = 0;
+      int errcode_ret = CL_SUCCESS;
+
+    send_event->size = target_machines.size();
+    send_event->events = new std::shared_ptr<cl_event>[send_event->size];
+
+    for (auto target_machine = begin(target_machines);
+            target_machine < end(target_machines);
+            ++target_machine)
+    {
+
+        if (*target_machine != my_id)
+        {
+          
+            cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
+            send_event->events[event_id] = std::make_shared<cl_event>(new_event);
+
+            barrier->send_data(lock, send_event->events[event_id], *target_machine, chunk_offset, chunks_sent);
+            event_id++;
+        }
+        else
+        {
+            send_event->size -= 1;
+        }
+    }
+    return errcode_ret;
 }
 
 template <typename data_type>
@@ -586,6 +528,7 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
                                         size_t offset,
                                         size_t cb,
                                         data_barrier<data_type> *barrier,
+                                        size_t barrier_offset,
                                         cl_uint num_events_in_wait_list,
                                         const distCL_event *event_wait_list,
                                         distCL_event *send_event,
@@ -613,13 +556,11 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
             return err;
         }
 
-
-
-        if (offset % barrier->chunk_size != 0 || (offset + cb) % barrier->chunk_size != 0 )
+        if (barrier_offset % barrier->chunk_size != 0 || (barrier_offset + cb) % barrier->chunk_size != 0 )
             std::runtime_error("Invalid offset, must align with chunk granularity");
 
         // Check offset falls within appropriate boundaries.
-        chunk_offset = offset / barrier->chunk_size;
+        chunk_offset = barrier_offset / barrier->chunk_size;
         chunks_sent = cb / barrier->chunk_size;
 
         cb *= sizeof(data_type);
@@ -634,66 +575,32 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
                                    blocking_read,
                                    offset,
                                    cb,
-                                   barrier->data,
+                                   &barrier->data[barrier_offset],
                                    0,
                                    NULL,
                                    lock.get());
 
         if (send_event != NULL)
         {
-            int event_id = 0;
-
-            send_event->size = target_machines.size();
-            send_event->events = new std::shared_ptr<cl_event>[send_event->size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                    send_event->events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(lock, send_event->events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    send_event->size -= 1;
-                }
-            }
+            err = internal_send(barrier,
+                                chunk_offset,
+                                chunks_sent,
+                                lock,
+                                send_event,
+                                my_id,
+                                target_machines);
         }
         else
         {
             distCL_event temp_event;
-            int event_id = 0;
-
-            temp_event.size = target_machines.size();
-            temp_event.events = new std::shared_ptr<cl_event>[temp_event.size];
-
-            for (auto target_machine = begin(target_machines);
-                    target_machine < end(target_machines);
-                    ++target_machine)
-            {
-
-                if (*target_machine != my_id)
-                {
-                    int errcode_ret;
-                    cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                    temp_event.events[event_id] = std::make_shared<cl_event>(new_event);
-
-                    barrier->send_data(lock, temp_event.events[event_id], *target_machine, chunk_offset, chunks_sent);
-                    event_id++;
-                }
-                else
-                {
-                    temp_event.size -= 1;
-                }
-            }
-            WaitForEvents(event_id, &temp_event, {});
+            err = internal_send(barrier,
+                                chunk_offset,
+                                chunks_sent,
+                                lock,
+                                &temp_event,
+                                my_id,
+                                target_machines);
+            WaitForEvents(1, &temp_event, {});
             delete [] temp_event.events;
         }
     }
@@ -737,6 +644,8 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
     }
     return err;
 }
+
+
 
 cl_int distributedCL::EnqueueNDRangeKernel(cl_command_queue command_queue,
         cl_kernel kernel,

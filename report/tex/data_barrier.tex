@@ -1,0 +1,190 @@
+\documentclass[report.tex]{subfiles}
+\begin{document}
+
+\subsection{data\_barrier Class} % (fold)
+
+The motivation for the data\_barrier class is simple; in order to fully distribute OpenCL programming there needs to be some form of interconnection between the distributed systems. This is where the data\_barrier comes in, it is the point of connection between the multiple systems, and as such it was important to get it right.
+
+The class was meant to contain all the information required for managing data between multiple machines, and as such it was required to contain all the information necessary for the transference of data between machines.
+
+As such, the first aspect of the data\_barrier class that will be examined at are its data members. After looking into the various components of the data\_barrier, as well as the motivations for each of them. Following this, all aspects of the member functions will be examined, their development from start to finish, their use, and future possible improvements.
+
+\subsubsection{Data Members} % (fold)
+\label{ssub:data_members}
+  The easiest way to gain an understanding of the data members is to look at the constructor for the data barrier, and then examine each component in turn. As can be seen in Figure~\ref{fig:data_barrier_constructor}, there are quite a few variables that go into the creation of a data\_barrier. Prior to looking at this, we'll look at the first aspect of the constructor, the template.
+
+  \begin{figure}[htbp]
+    \centering
+
+    \lstset{language=cpp}  
+    \begin{lstlisting}[tabsize=2]
+        template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context)
+        {
+          data_size = size_x;
+          if(data_size % granularity!= 0)
+            std::runtime_error("Error, data_size % granularity must equal 0");
+          number_chunks = size_x / granularity;
+          chunk_size = granularity;
+          message_tag = tag_value;
+          machine_id = id;
+          shared_machine_list = machines;
+          data = new data_type[size_x];
+          context = input_context;
+        }
+
+      \end{lstlisting}
+
+    \caption{data\_barrier constructor}
+    \label{fig:data_barrier_constructor}
+  \end{figure}
+   
+
+  \subparagraph{\lstinline[language=cpp]{template <typename data\_type>}} % (fold)
+  \label{subp:template_typename_data_type}
+    data\_barrier is, itself, a templated class. The motivation behind this is quite straightforward; reduce the amount of needless repetition of code. It would have been quite possible to write a different data\_barrier class for each of the possible OpenCL data\_types. Unfortunately, that would be a hugely wasteful use of time, the code would be practically the same for every single possible data\_type, with very minor variations. This would have led to an explosion of code; with more than ten possible data\_types \cite{opencldatatypes} in OpenCL 1.2, it made sense not to have so much duplication within the code. Thus data\_barrier was a templated class, and all it's internal functions are templated as well.
+
+    In practice, this just means that during construction you must provide the data\_type you require, as opposed to using a different class on a per data type basis. This can be seen in Figure~\ref{fig:templated_vs_non_templated}, where a single templated class is shown in contrast with a set of non-templated classes to provide what is, in the end, the same result.
+
+    \begin{figure}[htbp]
+      \centering
+
+      \lstset{language=cpp}  
+      \begin{lstlisting}[tabsize=2]
+
+        //templated class for float and int barriers
+        data_barrier<float> float_barrier_templated = data_barrier<float>(machines, size_x, granularity, tag_value, id,  input_context);
+
+        data_barrier<int> int_barrier_templated = data_barrier<int>(machines, size_x, granularity, tag_value, id,  input_context);
+
+        //non templated classes for float and int barriers
+        float_data_barrier float_barrier = float_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
+
+        int_data_barrier int_barrier = int_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
+        \end{lstlisting}
+
+      \caption{The difference between templated and generic classes}
+      \label{fig:templated_vs_non_templated}
+    \end{figure}
+  % subparagraph template_typename_data_type (end)
+  \subparagraph{\texttt{init\_list \&machines}} % (fold)
+  \label{subp:init_list}
+    The next component of the constructor, and one of the most important, is the init\_list. Init\_list is simply a macro for \newline\texttt{std::initializer\_list<int> \&machines}, a templated standard C\texttt{++} class, in this case with type integer. The purpose behind it's use is readily apparent once seen; it is used to easily allow the programmer to declare a list of integers defining the machines that the data\_barrier will target.
+
+    This is actually used quite frequently throughout the majority of code, and while it has it's own foibles in usage, the ability to provide a simple and quick inline declaration of targeted machines is quite useful. Its use can be seen in Figure~\ref{fig:init_list_vs_others}; which compares the use of a statically initialized array, a vector, and an initializer\_list.
+
+     \begin{figure}[htbp]
+      \centering
+
+      \lstset{language=cpp}  
+      \begin{lstlisting}[tabsize=2]
+        // Functions for each data type
+        void arrayFunc(int array[]){};
+        void vectorFunc(std::vector<int> vec){};
+        void initlistFunc(std::initializer_list<int> &initlist){};
+
+        // An array
+        int myArray[3] = {1,2,4};
+        arrayFunc(myArray);
+
+        // A vector (inline declaration allowed as of C++11)
+       std::vector<int> vec = {1, 2, 4};
+       vectorFunc(vec);
+
+       // initializer_list
+       initlistFunc({1,2,4});
+        \end{lstlisting}
+
+      \caption{The difference between templated and generic classes}
+      \label{fig:init_list_vs_others}
+    \end{figure}
+
+    Although this ignores how the data passed in is handled, from the perspective of someone using this library, that is not important. As such, the use of an initializer\_list allows for an inline declaration, easing the burden on the programmer.
+
+    As for what this is actually used for, as mentioned briefly above it is a list of the machines that are targeted by the data\_barrier. What that means in this context, is that if the machine is not contained within the list, any machines that use this barrier in a function call immediately return having done nothing. Additionally, and this is covered later, there is a factory function that returns an empty class object if not one of the target machines.
+
+    The value `machines' is stored within the data member \texttt{shared\_machine\_list}, which is used by many functions to quickly check if the machine listed is valid to be targeted by a function call.
+  % subparagraph init_list (end)
+
+  \subparagraph{\texttt{int size\_x}} % (fold)
+  \label{subp:int_size_x}
+      The next component in the constructor is \texttt{size\_x}. As can be seen in Figure~\ref{fig:data_barrier_constructor}, \texttt{size\_x} is used in three data members; \texttt{data\_type * data}, \texttt{int data\_size}, and \texttt{int number\_chunks}.
+
+      The \texttt{data\_size} member is quite straightforward; it is the number of values contained within \texttt{data\_type * data}. In this situation, its value is a quite straightforward assignment from \texttt{size\_x} to \texttt{data\_size}, because it is dealing with a one dimensional array. Given a greater dimensional array, more values would be included in the constructor (such as \texttt{size\_y} and \texttt{size\_z}), but for this one-dimensional array only one is needed.
+
+      This leads directly to \texttt{data\_type * data}, an array of data\_type. This is, quite obviously, the most important component of the data\_barrier, for it is the actual data that is dealt with.
+  % subparagraph int_size_x (end)
+
+  \subparagraph{\texttt{int granularity}} % (fold)
+  \label{subp:int_granularity}
+    Granularity follows very closely on \texttt{int data\_size}'s heels; it determines the granularity with which data transfers are correct to. It essentially divides \texttt{data\_type * data} into a series of chunks of size granularity, which is stored within data\_barrier as \texttt{int chunk\_size}.
+
+    Whenever data is transfered between machines, it is done so in these chunks, and the atomicity of these transactions is guaranteed. Thus if two machines are simultaneously sending data to a third, there is a guarantee that data will be correct on a per chunk basis, although if both machines are sending the same chunk there is no guarantee which chunk will be kept.
+
+    Finally, the granularity is used in conjunction with \texttt{data\_size} to determine another data member, \texttt{int number\_chunks}. This is quite straightforward as well, the number of chunks of size granularity that fit within \texttt{data\_size}. One restriction upon these, is that \texttt{data\_size \% granularity == 0}.
+
+    That is to say, the number of chunks multiplied by the size of the chunks must be equal to the size of the data. If the chunks do not perfectly align, an error will be thrown.
+
+    The reason granularity is useful, as seen in Figure~\ref{fig:}, is when multiple machines are working on a single data\_barrier. If machine 1 only modifies the lower half of the data, and machine 3 only the upper, when they send the data on to machine 2 there will be no conflict within the data transfers. Thus data can be easily manipulated on multiple machines without worrying about conflict, as long as one pays attention to the data boundaries.
+
+    \begin{figure}[htbp]
+      \centering
+      \tikzset{my arrow/.style={blue!60!black,-latex}}
+
+      \begin{tikzpicture}
+        \matrix[matrix of math nodes, row sep=4mm](M)
+        {
+          \node {Machine 1}; & \node{Machine 2}; & \node{Machine 3}; \\ 
+          \node {8}; &[2mm] \node{1}; &[-1mm] \node {6}; \\
+          \node {3}; &      \node{5}; &       \node {7}; \\
+          \node {4}; &      \node(a){9}; &    \node {2}; \\
+        };
+      \end{tikzpicture}
+
+
+      \caption{caption}
+      \label{fig:label}
+    \end{figure}
+  % subparagraph int_granularity (end)
+
+% subsubsection data_members (end)
+
+\label{sub:data_barrier_class}
+
+% \begin{figure}[htbp]
+%     \centering
+%     \begin{sequencediagram}
+%     \newthread{ss}{}{SimulationServer}
+%     \newinst{ctr}{}{SimControlNode}
+%     \newinst{ps}{}{PhysicsServer}
+%     \newinst[1]{sense}{}{SenseServer}
+
+%     \begin{call}{ss}{Initialize()}{sense}{}
+%     \end{call}
+%     \begin{sdloop}{Run Loop}
+%       \begin{call}{ss}{StartCycle()}{ctr}{}
+%         \begin{call}{ctr}{ActAgent()}{sense}{}
+%         \end{call}
+%       \end{call}
+%       \begin{call}{ss}{Update()}{ps}{}
+%         \begin{call}{ps}{PrePhysicsUpdate()}{sense}{state}
+%         \end{call}
+%         \begin{callself}{ps}{PhysicsUpdate()}{}
+%         \end{callself}
+%         \begin{call}{ps}{PostPhysicsUpdate()}{sense}{}
+%         \end{call}
+%       \end{call}
+%       \begin{call}{ss}{EndCycle()}{ctr}{}
+%         \begin{call}{ctr}{SenseAgent()}{sense}{}
+%         \end{call}
+%       \end{call}
+%     \end{sdloop}
+%   \end{sequencediagram}
+
+%     \caption{caption}
+%     \label{fig:label}
+% \end{figure}
+
+
+% subsection data_barrier_class (end)
+
+\end{document}

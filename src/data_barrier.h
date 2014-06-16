@@ -43,8 +43,6 @@ public:
     data_type *data;
     cl_context context;
 
-    cl_mem buffer;
-
     data_barrier() {};
     data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id);
     data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context);
@@ -77,7 +75,7 @@ public:
 
     void send_data(std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
     void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
-    void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent, data_type * data){};
+    // void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent, data_type * data){};
     void receive_data(std::shared_ptr<cl_event> recv_event, int source_machine);
 
     // void receive_data(int source_machine);
@@ -87,6 +85,8 @@ public:
 template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id)
 {
     data_size = size_x;
+    if(data_size % granularity!= 0)
+        std::runtime_error("Error, data_size % granularity must equal 0");
     number_chunks = size_x / granularity;
     chunk_size = granularity;
     message_tag = tag_value;
@@ -248,6 +248,8 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
 {
     if (offset + chunks_sent > number_chunks)
         std::runtime_error("offset + chunks_sent value out of bounds");
+    if (offset < 0 || offset > number_chunks)
+        std::runtime_error("offset value out of bounds");
     std::vector<int> chunks_to_send;
     for (int chunk_id = offset; chunk_id < (offset + chunks_sent); ++chunk_id)
     {
