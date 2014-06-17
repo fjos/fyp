@@ -1,0 +1,38 @@
+
+\chapter{Background Theory}
+
+\label{ch:background}
+
+\section{Introduction}
+
+Text of the Background.
+
+
+    \subsection{OpenCL (Open Computing Language)} % (fold)
+    \label{sub:opencl}
+        The Open Computing Language (OpenCL) was originally developed and proposed by Apple Inc. as an open standard for parallel computing. After it's initial proposal by Apple, industry leaders worked together to create the technical specifications for the framework. The specifications were approved for and released publically by The Khronos Group on December 8, 2008\cite{opencl10pressrelease}.
+
+        OpenCL is a framework for creating programs that execute across heterogeneous platforms (platforms consisting of more than one type of processor). It provides a standard application programming interface (API) for a wide variety of architectures, and today there are a large number of products that are OpenCL conformant\cite{khronosconformance}. As such, any code written in OpenCL can naturally target a large number of platforms, thus making it an attractive choice when developing parallel applications.  
+    % subsection opencl (end)
+
+    \subsection{OpenMPI} % (fold)
+    \label{sub:openmpi}
+        The Message Passing Interface (MPI) standard is a standard that ``addresses primarily the message-passing parallel programming model, in which data is moved from the address space of one process to that of another process through cooperative operations on each process''\cite{MPI-2.2}, or, in simpler terms, is a standard that primarily defines how multiple processes communicate with one another. 
+
+        Additionally, it attempts to define an interface for a simple, portable, standard for communication. Some of the precepts laid down within the MPI standard is that communication should be reliable, that it should be usable on many platforms, and that it should be efficient.
+
+        % Through the combined work of roughly 60 people from all across the world, a standard for message-passing was drafted and proposed in late 1992, and over time the standards have been corrected and refined. The most current standard is MPI-3.0.\cite{MPI-3.0}
+
+        OpenMPI is an open source implementation of the MPI-2 standard, built from a merger between FT-MPI (University of Tennessee), LA-MPI (Los Alamos National Laboratory), and LAM/MPI (Indiana University) with the PACX-MPI team (University of Stuttgart) contributing. By combining these four implementations it was hoped that a fast, efficient MPI implementation could be built.\cite{openmpiwebsite} Additionally, it is supported by a wide variety of platforms, and is attractive in that regard as well.
+
+        This implementation of MPI will provide this project's basis for data transfers and communication between networked GPUs.
+    
+    \subsection{CUDA and Close To Metal} % (fold)
+    \label{sub:cuda_and_close_to_metal}
+        CUDA (Compute Unified Device Architecture) is NVIDIA's proprietary solution to General-Purpose Computing on Graphics Processing Units (GPGPU). Although there could be a lengthy discussion about the differences between CUDA and OpenCL, research has shown that under a fair comparison there OpenCL and CUDA can achieve similar performance\cite{6047190}.
+
+        As such, the chief difference is that CUDA enabled devices are available solely from NVIDIA\cite{cudagpus}, and the portability of OpenCL makes it much more attractive for distributed systems as it is not limited to a single brand of device.
+
+        Close to Metal will only be mentioned briefly as it has been discontinued. It was, for a brief time, AMD Graphic Product Group's (then ATI's) solution to GPGPU. AMD has since switched to supporting OpenCL, thus increasing the number of platforms that utilize OpenCL as their primary method for GPGPU.
+    % subsection cuda_and_close_to_metal (end)
+

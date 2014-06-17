@@ -1,0 +1,64 @@
+Title Page
+
+Abstract
+
+Acknowledgments
+
+Contents
+
+Intro
+
+Background
+
+Body
+    --distributedCL class
+        --essentially a factory function
+        --deals with limitations of MPI
+            --MPI INIT
+            --MPI FINALIZE
+        --alll them functions
+        -- clCreateContext wrapper changed;
+            --originally returned cl_event, err passed by reference
+            --reversed that so context only set for targets
+            --many functions like this
+    --data_barrier class
+        -- Wrapper containing information about data
+        -- granularity, size, etc
+        -- template for ease
+            -- eventually include a buffer object
+            -- currently an array that can be used, would be better if had associated buffer
+            -- easy enough to implement, needs to be read write though
+            -- only create if call to implement buffer
+            
+
+            -- cl_enq copy buffer?
+            -- recv allocates mem and then pushes, frees
+            -- would be better??? probably
+
+    --distCL_event
+        -- wrapper for array of shared_ptr<cl_event>
+            --allows for thread usage of cl_event
+            --essential for appropriate data flow
+            -diagrams???
+                --definitely
+
+    --Generic opencl functions
+        -- initializer list for ease of targeting, called by distributedCL? yeah, sort of needed that way..
+
+
+    --a beautiful graph
+        -- time to transfer data to GPU from machine
+
+Evaluation
+
+    --Sample programs
+    --throughput
+    --why we ignore latency
+
+Conclusions Future Work
+
+Biblio
+
+Appendix
+
+User Guide

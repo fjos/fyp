@@ -17,7 +17,7 @@ typedef struct distCL_event
 {
     int size;
     std::shared_ptr<cl_event> *events;
-    distCL_event():size(0){};
+    distCL_event(): size(0) {};
     // void setSize(int s)
     // {
     //     size = s;
@@ -41,6 +41,7 @@ public:
     int message_tag;
     int machine_id;
     data_type *data;
+    data_type *previous_data;
     cl_context context;
 
     data_barrier() {};
@@ -61,6 +62,12 @@ public:
                 output << data[i] << " ";
             }
             output << std::endl;
+            output << "Previous Data " << machine_id << " :"  << std::endl;
+            for (int i = 0; i < data_size; ++i)
+            {
+                output << previous_data[i] << " ";
+            }
+            output << std::endl;
 
         }
         if (show_stats == true)
@@ -74,7 +81,10 @@ public:
     }
 
     void send_data(std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
+    void send_data(std::shared_ptr<cl_event> send_event, int target_machine, std::vector<int> chunks_to_send);
     void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent);
+    void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, std::vector<int> chunks_to_send);
+
     // void send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, int offset, int chunks_sent, data_type * data){};
     void receive_data(std::shared_ptr<cl_event> recv_event, int source_machine);
 
@@ -85,7 +95,7 @@ public:
 template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id)
 {
     data_size = size_x;
-    if(data_size % granularity!= 0)
+    if (data_size % granularity != 0)
         std::runtime_error("Error, data_size % granularity must equal 0");
     number_chunks = size_x / granularity;
     chunk_size = granularity;
@@ -93,6 +103,8 @@ template <typename data_type> data_barrier<data_type>::data_barrier(const init_l
     machine_id = id;
     shared_machine_list = machines;
     data = new data_type[size_x];
+    previous_data = new data_type[size_x];
+
 }
 
 template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context)
@@ -104,6 +116,7 @@ template <typename data_type> data_barrier<data_type>::data_barrier(const init_l
     machine_id = id;
     shared_machine_list = machines;
     data = new data_type[size_x];
+    previous_data = new data_type[size_x];
     context = input_context;
 }
 
@@ -111,6 +124,7 @@ template <typename data_type> data_barrier<data_type>::data_barrier(const init_l
 template <typename data_type> data_barrier<data_type>::~data_barrier()
 {
     delete []data;
+    delete []previous_data;
 }
 
 template <typename data_type> void send_thread_lock(std::shared_ptr<cl_event> lock,
@@ -144,10 +158,6 @@ template <typename data_type> void send_thread_lock(std::shared_ptr<cl_event> lo
     {
         int chunk_id = chunks_to_send.back();
         chunks_to_send.pop_back();
-
-        // std::copy(data + chunk_id * chunk_size,
-        //           data + (chunk_id + 1)*chunk_size,
-        //           previous_data + chunk_id * chunk_size);
         event_mpi.push_back(new_request);
 
         ierr = MPI_Isend(data + chunk_id * chunk_size,
@@ -158,14 +168,12 @@ template <typename data_type> void send_thread_lock(std::shared_ptr<cl_event> lo
                          MPI_COMM_WORLD,
                          &event_mpi.back());
     }
-    while(!event_mpi.empty())
+    while (!event_mpi.empty())
     {
         MPI_Wait(&event_mpi.back(), MPI_STATUS_IGNORE);
         event_mpi.pop_back();
     }
     clSetUserEventStatus(*send_event, CL_SUCCESS);
-
-    
 }
 
 
@@ -173,12 +181,22 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
 {
     if (offset + chunks_sent > number_chunks)
         std::runtime_error("offset + chunks_sent value out of bounds");
+    if (offset < 0 || offset > number_chunks)
+        std::runtime_error("offset value out of bounds");
     std::vector<int> chunks_to_send;
     for (int chunk_id = offset; chunk_id < (offset + chunks_sent); ++chunk_id)
     {
         chunks_to_send.push_back(chunk_id);
+        std::copy(data + chunk_id * chunk_size,
+                  data + (chunk_id + 1)*chunk_size,
+                  previous_data + chunk_id * chunk_size);
     }
+    send_data(lock, send_event, target_machine, chunks_to_send);
 
+}
+
+template <typename data_type> void data_barrier<data_type>::send_data(std::shared_ptr<cl_event> lock, std::shared_ptr<cl_event> send_event, int target_machine, std::vector<int> chunks_to_send)
+{
     std::thread t(send_thread_lock<data_type>,
                   lock,
                   send_event,
@@ -190,8 +208,8 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
                   chunks_to_send,
                   target_machine);
     t.detach();
-}
 
+}
 
 
 template <typename data_type> void send_thread(std::shared_ptr<cl_event> send_event,
@@ -221,10 +239,6 @@ template <typename data_type> void send_thread(std::shared_ptr<cl_event> send_ev
     {
         int chunk_id = chunks_to_send.back();
         chunks_to_send.pop_back();
-
-        // std::copy(data + chunk_id * chunk_size,
-        //           data + (chunk_id + 1)*chunk_size,
-        //           previous_data + chunk_id * chunk_size);
         event_mpi.push_back(new_request);
 
         ierr = MPI_Isend(data + chunk_id * chunk_size,
@@ -235,7 +249,7 @@ template <typename data_type> void send_thread(std::shared_ptr<cl_event> send_ev
                          MPI_COMM_WORLD,
                          &event_mpi.back());
     }
-    while(!event_mpi.empty())
+    while (!event_mpi.empty())
     {
         MPI_Wait(&event_mpi.back(), MPI_STATUS_IGNORE);
         event_mpi.pop_back();
@@ -254,7 +268,16 @@ template <typename data_type> void data_barrier<data_type>::send_data(std::share
     for (int chunk_id = offset; chunk_id < (offset + chunks_sent); ++chunk_id)
     {
         chunks_to_send.push_back(chunk_id);
+        std::copy(data + chunk_id * chunk_size,
+                  data + (chunk_id + 1)*chunk_size,
+                  previous_data + chunk_id * chunk_size);
+
     }
+    send_data(send_event, target_machine, chunks_to_send);
+}
+
+template <typename data_type> void data_barrier<data_type>::send_data(std::shared_ptr<cl_event> send_event, int target_machine, std::vector<int> chunks_to_send)
+{
     std::thread t(send_thread<data_type>,
                   send_event,
                   data,
@@ -294,7 +317,14 @@ template <typename data_type> void receive_thread( std::shared_ptr<cl_event> rec
 
 template <typename data_type> void data_barrier<data_type>::receive_data(std::shared_ptr<cl_event> recv_event, int source_machine)
 {
-    std::thread t(receive_thread<data_type>, recv_event, data, message_tag, number_chunks, chunk_size, source_machine, machine_id);
+    std::thread t(receive_thread<data_type>,
+                  recv_event,
+                  data,
+                  message_tag,
+                  number_chunks,
+                  chunk_size,
+                  source_machine,
+                  machine_id);
     t.detach();
 }
 

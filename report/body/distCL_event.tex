@@ -1,0 +1,128 @@
+\documentclass[report.tex]{subfiles}
+\begin{document}
+\section{Event Based Programming} % (fold)
+\label{sec:event_based_programming}
+    One of the last topics that was covered in the data\_barrer class section was the threaded send and receive, and how they utilized clSetUserEventStatus to signal when they had completed. This wasn't always the case; prior to that the method for determining completion was far more varied. In this section, we'll look at the motivation behind event based programming, and how the implementation used in the project progressed and was designed.
+
+    \subsection{OpenCL Event Model} % (fold)
+    \label{sub:opencl_event_model}
+        OpenCL supports many robust methods for ensuring synchronization, and the topic of event based synchronization is a rather in depth one. Most of the knowledge of how to properly utilize events comes from the SIGGRAPH Asia 2009 Course on OpenCL Events\cite{advancedopenclevent}, and we'll start with a brief overview of what cl\_events are, and how they are used.
+
+        OpenCL supports a whole suite of methods that allow you to enqueue a command that you wish to take place, and all of these methods can return an event. These events can be used in the construction of an event wait list, as seen in Figure~\ref{fig:event_wait_list_construction}.
+
+        \begin{figure}[htbp]
+            \centering
+
+            \lstset{language=cpp}  
+            \begin{lstlisting}[tabsize=2]
+            cl_event * event_wait_list = new cl_event[2];
+
+            err = clEnqueueWriteBuffer(queue, buffer1, CL_FALSE, 0, 0, data_ptr, 0, NULL, &event_wait_list[0]);
+
+            err = clEnqueueWriteBuffer(queue, buffer2, CL_FALSE, 0, 0, data_ptr, 0, NULL, &event_wait_list[1]);
+            \end{lstlisting}
+            \caption{Constructing a Short Event Wait List}
+            \label{fig:event_wait_list_construction}
+        \end{figure}
+
+        Once you have an event wait list, you have two options for ensuring the completion of the events prior to executing the next commands. Both of these can be seen in Figure~\ref{fig:cl_enqueue_wait_list}.
+
+        \begin{figure}[htbp]
+            \centering
+            \lstset{language=cpp}  
+            \begin{lstlisting}[tabsize=2]
+            //clWaitForEvents
+            cl_event * event_wait_list = new cl_event[num_events_in_list];
+            ...
+            clWaitForEvents(num_events_in_list, event_wait_list);
+            err = clEnqueueReadBuffer(queue, buffer, CL_FALSE, 0, 0, data_ptr, 0, NULL, NULL);
+            //built in
+             err = clEnqueueReadBuffer(queue, buffer, CL_FALSE, 0, 0, data_ptr, num_events_in_list, event_wait_list, NULL);
+            \end{lstlisting}
+            \caption{clEnqueue Methods with Wait Lists}
+            \label{fig:cl_enqueue_wait_list}
+        \end{figure}
+
+        As can be seen, either an explicit call to clWaitForEvents can be made, or the event\_wait\_list can be passed directly to the enqueue function.
+
+        Although there are other methods for synchronization, such as clEnqueueBarrier (all commands in the queue prior to this will block until completion), this was chosen as the most robust and as such was the basis for all synchronization within distributedCL.
+    % subsection opencl_event_model (end)
+
+    \subsection{distCL\_event Design} % (fold)
+    \label{sub:distcl_event_design}
+        Once it was decided that events would be used for synchronization, it was then just a matter of designing and building events. The first step was choosing how events should be represented. At this point, there were a few ways to go. It seemed natural to base the send and receive event on a std::vector of MPI\_Requests. When it came time to ensure their completion, it would be a matter of iterating through and calling MPI\_Wait on each. Additionally, it would need to handle OpenCL events (cl\_event). 
+        \subsubsection{distCL\_event First Iteration} % (fold)
+        \label{ssub:distcl_event_first_iteration}
+            Thus the first distCL\_event was a structure containing three components; an integer containing the enumeration specifying what type of event this distCL\_event was associated (an MPI or CL event), a std::vector<MPI\_Request> and a cl\_event. The clWaitForEvents method was replaced with a method WaitForEvents() that checked the event type, and called the method appropriate for handling it.
+
+            When it came time to thread the receive function, it was realized that the usage of a vector to contain the MPI\_Requests was no longer feasible; vectors were not thread safe. When a vector is modified by push\_back() there is a chance of reallocation, should that happen the data is invalidated. This was a very real worry, and as such it was decided to change. Although there was the possibility of switching to a std::list which neatly sidesteps the problem of reallocation, the problem still would not be solved.
+
+            This can easily be imagined; if WaitForEvents was called prior to the all the calls to MPI\_Recv, there is a chance that the entire list would be consumed prior to properly adding all the MPI\_Request. Thus although WaitForEvents would return successfully, there was no guarantee that all of the receives would have completed.
+
+            As at the time I was still unaware of MPI\_Request leakage, and the fact that MPI\_Wait had to be called on all the MPI\_Isend requests, the distCL\_event was split into two unique event types; an MPI\_Send type and an MPI\_Recv type. The send event was still a vector of MPI\_Requests, the receive event was now a vector of thread ids, containing the std::thread id associated with a thread upon it's creation.
+
+            Now, the event handling determined if it was one of three types of event, called MPI\_Wait for the sends, clWaitForEvent for the cl\_events, and thread.join for the receive events. It was getting out of control, the events were getting far more complex than necessary and there was no unified way of dealing with them. The structure of a distCL\_event at this stage can be seen in Figure~\ref{fig:distCL_event_uml_original}, and it was a slight mess.
+
+            \begin{figure}[htbp]
+                \centering
+                \includegraphics[width=0.65\textwidth]{diagrams/distCL_event_original.1}
+                \caption{distCL\_event original}
+                \label{fig:distCL_event_uml_original}
+            \end{figure}
+            
+        % subsubsection distcl_event_first_iteration (end)
+        
+        \subsubsection{distCL\_event Current Design} % (fold)
+        \label{ssub:distcl_event_current_design}
+            When it came time to integrate sends and receives with actual OpenCL code, it was very difficult to do so. The tipping point was actually the creation of a distributed clEnqeueueWriteBuffer. A call to enqueue a write buffer was important, because if a write was enqueued from a separate machine, the data had to be sent across a network prior to allowing for use. Thus, clEnqueueWriteBuffer could not execute until the receive event was completed, and as it was there was no way to implement that. Unless the complexity was increased even more by calling clEnqueueWriteBuffer within it's own thread, the distCL\_event could no longer stay the same way.
+
+            The solution was OpenCL user events. As previously discussed, OpenCL enqueue methods accept cl\_event lists, and this allowed to ensure the proper ordering of the receive and enqueue, without sacrificing the ability to execute the rest of the commands out of order.
+
+            This was accomplished using std::shared\_ptrs and cl\_events. First, the reasoning behind shared\_ptrs. One of the problems that was encountered  with threaded sends, was that a send would start as soon as it called, and in certain situations this was undesirable behavior. It would be ideal if the thread would wait on a cl\_event created by an enqueue method prior to attempting to send (this situation can be seen within EnqueueReadBuffer with the provided code). 
+
+            When this was implemented without a std::shared\_ptr, problems would be encountered where the cl\_event would fall out of scope before clWaitForEvents could be called, thus calling clWaitForEvents on an arbitrary chunk of memory. Shared pointers allow multiple threads to access the same data; keeping track of how many instances of the pointer exist and only freeing the underlying memory when all fall out scope. By using shared\_ptrs there was an assurance that all threads and OpenCL calls would be dealing with the same piece of data.
+
+            Some events, such as send events, require multiple cl\_events, one per machine being sent to. As such, a single distCL\_event may have to hold multiple cl\_events. This led to the final design of a distCL\_event; an array of std::shared\_ptrs of cl\_events. This can be seen in Figure~\ref{fig:distCL_event_uml_current}; in contrast to the original in Figure~\ref{fig:distCL_event_uml_original} it is far simpler and allows for easy implementation of all desired behavior.
+            
+            \begin{figure}[htbp]
+                \centering
+                \includegraphics[width=0.65\textwidth]{diagrams/distCL_event_current.1}
+                \caption{distCL\_event current}
+                \label{fig:distCL_event_uml_current}
+            \end{figure}
+
+        % subsubsection distcl_event_current_design (end)
+    % subsection distcl_event_design (end)
+
+    \subsection{distCL\_event Usage} % (fold)
+    \label{sub:distcl_event_usage}
+        One of the goals in creating distCL\_event was to stay as true as possible to the OpenCL event model. In the original event iteration, there was a wrapper containing a vector of distCL\_events. This was first created with the thought of allowing a simpler usage of events; simply pass one object by reference and the rest would be taken care of. Unfortunately, events were used and modified asynchronously. This unfortunately led to some situations where pointers would be invalidated by the changing vector, how this happens can be seen below.
+
+        GUYS FIGURE HERE FOR MUTEXTHINGY
+
+        Instead of adding additional levels of complication by dealing with mutexes, it was much easier to switch to using std::list; a solution that should have been readily apparent from the start. Because there was no longer a danger of reallocation when modifying the container, thread safety was far easier to guarantee.
+        
+        It should be noted: the decision to switch from a vector to a standard array was made prior to the all events being shared\_ptrs to cl\_events. A large part of the danger of vectors could have been mitigated by using shared\_ptrs, thus removing any need to pass by reference.
+
+        This meant that when the change to using solely cl\_event and std::shared\_ptr was made, there was the possibility of returning to using std::vector. This idea was, however, discarded. There was no reason to return to a less safe structure. There was only one problem left; using the list led to far more indirect handling of events, and a reduction in the clarity of code. 
+
+        It was for this reason that the idea of reducing involvement in creating a list of events was reconsidered. This reevaluation led to the abandonment of containers and the return to the event model used in OpenCL; a pointer to the head of an array of events and the number of items in the array.
+
+        Thus the usage of event based synchronization ended up being very similar to that of OpenCL's original model. This can be seen below in one of the simplest event based synchronization calls; clWaitForEvents.
+
+        \begin{lstlisting}
+        //Standard OpenCL clWaitForEvents call
+        clWaitForEvents(cl_uint num_events_in_list, cl_event * event_wait_list)
+        
+        // distributedCL WaitForEvents
+        // target_machines provides a list of machines that WaitForEvents acts upon
+        distributedCL::WaitForEvents(cl_uint num_events_in_list, distCL_event * event_wait_list, init_list target_machines)
+        \end{lstlisting}
+
+        This behaviour holds true in the many OpenCL functions that can take events; a pointer to the set of events and the number of events to wait on.
+
+    % subsection distcl_event_usage (end)
+
+% section event_based_programming (end)
+
+\end{document}
