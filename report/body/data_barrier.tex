@@ -3,7 +3,16 @@
 
 \section{data\_barrier Class} % (fold)
 
-The motivation for the data\_barrier class is simple; in order to fully distribute OpenCL programming there needs to be some form of interconnection between the distributed systems. This is where the data\_barrier comes in, it is the point of connection between the multiple systems, and as such it was important to get it right.
+The motivation for the data\_barrier class is simple; in order to fully distribute OpenCL programming there needs to be some form of interconnection between the distributed systems. This is where the data\_barrier comes in, it is the point of connection between the multiple systems, and as such it was important to get it right. It is meant to essentially be a data barrier located between two or more machines, their point of interconnection. A visualization of the barrier can be seen in Figure~\ref{fig:data_barrier_vis}.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\textwidth]{diagrams/data_barrier_visual.png}
+  \caption{Data Barrier Visualization}
+  \label{fig:data_barrier_vis}
+\end{figure}
+
+In this, there is a shared barrier between Machine 1 and 2, and a shared barrier between Machines 2, 3, and 4. Thus data transfers between Machine 1 and 3/4 can only occur if they pass through Machine 2 first. That is what data barriers are for, points where data can pass through and be synchronized.
 
 The class was meant to contain all the functions and information necessary for the transference of data between machines. The actual members can be seen in Figure~\ref{fig:data_barrier_class}, a UML diagram for the data\_barrier class.
 
@@ -372,7 +381,7 @@ initlistFunc({1,2,4});
       \label{fig:selective_send}
     \end{figure}
 
-    The importance of having a selective send can easily be seen in Figure~\ref{fig:selective_send}. The top half of the diagrams shows what happens when you arbitrarily send all data during a synchronization event. As can be seen, there are numerous messages being passed to each chunk, so that in Cycle2 there is no guarantee what any of the chunks contains. This is in great contrast to the bottom half, where the synchronization event only sent out the chunks that have been changed. As can be seen, the results are far more predictable, and far fewer sends are required.
+    The importance of having a selective send can easily be seen in Figure~\ref{fig:selective_send}. The top half of the diagrams shows what happens when you arbitrarily send all data during a synchronization event. As can be seen, there are numerous messages being passed to each chunk, so that in Cycle2 there is no guarantee what any of the chunks contains. This is in great contrast to the bottom half, where the synchronization event only sent out the chunks that have been changed. As can be seen, the results are far more predictable, and far fewer sends are required. A function SyncBarrier is provided, that automatically performs this synchronization.
 
    % subsubsection synchronization_events (end)
 

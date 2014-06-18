@@ -70,7 +70,7 @@ data_barrier<data_type> distributedCL::CreateBarrier(int size_x, int granularity
 
     \subsubsection{world\_rank and world\_size} % (fold)
     \label{ssub:world_rank_and_world_size}
-        The first thing to be discussed is the use of world\_rank and world\_size. World\_rank is a value that defines the rank of the process on the communication MPI\_COMM\_WORLD. MPI\_COMM\_WORLD is the generic communicator used for all processes; it can be used to communicate with all processes created when running the program. World\_size is simply the total number of processes created.
+        The first thing to be discussed is the use of world\_rank and world\_size. World\_rank is a value that defines the rank of the process on the communication \texttt{MPI\_COMM\_WORLD}. \texttt{MPI\_COMM\_WORLD} is the generic communicator used for all processes; it can be used to communicate with all processes created when running the program. World\_size is simply the total number of processes created.
 
         If you remember the data\_barrier constructor, world\_rank's use should be relatively obvious: the data\_barrier needs a machine\_id associated with it, which translates directly to world\_rank. Thus the distributedCL class passes the rank of the machine to data\_barrier for the reasons mentioned before; easy access to this value simplifies communication.
 
@@ -129,7 +129,7 @@ data_barrier<float> outputbarrier = distributedCL.CreateBarrier<float>(size_x, g
 
         As such, the wrapping function is easy, it's the same function call with the addition of an extra variable, init\_list target\_machines.
 
-        The actual wrapping is simple, as can be seen in Figure~\ref{fig:distcl_getplatformids}, the code for distributedCL::GetPlatformIDs.
+        The actual wrapping is simple, as can be seen in Figure~\ref{fig:distcl_getplatformids}, the code for distributedCL:: GetPlatformIDs.
 
         \begin{figure}[htbp]
             \centering
@@ -160,7 +160,7 @@ cl_int distributedCL::GetPlatformIDs(cl_uint num_entries,
 
     All the parameters are passed the same way, and if the world\_rank is found within the list of targeted machines, it calls clGetPlatformIDs, a standard OpenCL function. If the machine is not targeted, it returns the standard CL\_SUCCESS for a successfully completed processing. Thus error checking can be done on all machines, without worrying that a machine that didn't execute the previous command had it fail.
 
-    The section of the if statement `|| target\_machines.size() == 0' is for the specific case where you wish for the call to be performed on all machines. Figure~\ref{fig:universal_target} shows how to utilize this ability, showing the difference in targeting only the machine of rank 1 and targeting all machines.
+    The section of the if statement `\texttt{||} target\_machines.size() == 0' is for the specific case where you wish for the call to be performed on all machines. Figure~\ref{fig:universal_target} shows how to utilize this ability, showing the difference in targeting only the machine of rank 1 and targeting all machines.
 
     \begin{figure}[htbp]
         \centering

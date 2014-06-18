@@ -3,13 +3,13 @@
 \chapter{Introduction}
 
 \section{Motivation and Objectives}
-The
-Motivation and Objectives here.
+    OpenCL is a standard API for parallel programming, utilized and supported by a large variety of data-parallel architectures. It is widely used for High Performance Computing (HPC) to enhance the speed of calculations that can be done in parallel.
 
+    The goal of this project is to examine solutions to, and then implement a third level of a memory hierarchy in OpenCL, where memory is shared between networked devices.
 
+    The normal method for achieving this is to write code using a combination of MPI and OpenCL to achieve distributed parallel computing. The problem with such an approach is it requires the programmer to be well aware of the MPI directives, and write all the memory transfers by hand, leading to more complex code. In this project we will implement an API that allows us to easily exploit distributed computation devices. We aim to do this by providing a class that when created functions as a data barrier between specified machines. We will then utilize that as the basis for data communications across machines in distributed OpenCL functions. 
+% section project_specification (end)
 
-
-AGDKLZXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 \section{Background}
     In this section we'll discuss the components utilized for this project, as well as looking at how some other projects tackled the same task.

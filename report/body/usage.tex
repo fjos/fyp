@@ -16,9 +16,9 @@ Most of the information and source code will be available soon at the github rep
     The first requirement to running distributedCL is to have OpenCL available upon all machines you wish to target. There are many guides online for setting up OpenCL, but a good one for linux is available at Andreas Klöckner's wiki \url{http://wiki.tiker.net/OpenCLHowTo}.
 % subsection opencl_use (end)
 \subsection{OpenMPI} % (fold)
-\label{sub:openmpi}
+\label{sub:openmpi_use}
     The next is to ensure all machines have OpenMPI installed. You'll compile and run the program as a typical MPI program. All the information needed to prepare OpenMPI on your machines can be found at \url{http://www.open-mpi.org/}.
-% subsection openmpi (end)
+% subsection openmpi_use (end)
 
 \subsection{Coding with distributedCL} % (fold)
 \label{sub:coding_with_distributedcl}
@@ -26,7 +26,7 @@ Most of the information and source code will be available soon at the github rep
     \begin{enumerate}
     \item A distributedCL program must always start with the construction of an instance of the distributedCL class (at least before any other distributedCL functions can be called)
     \item A distributedCL program must always terminate with a call to distributedCL::Finalize
-    \item All distCL\_events that have been passed into a function must have distributedCL::WaitForEvents called on them prior to distributedCL::Finalize
+    \item All distCL\_events that have been passed into a function must have distributedCL:: WaitForEvents called on them prior to distributedCL::Finalize
     \item All distributedCL functions return errors as a cl\_int, OpenCL functions that ordinarily return alternatives instead take a reference to that object as the first parameter
     \item In place of void pointers for data in read and write commands, you must pass a pointer to a data\_barrier
     \item Functions that involve cross process communications allow for two events (send and receive) as opposed to the standard one
