@@ -19,7 +19,7 @@ public:
     void Finalize();
 
     template<typename data_type>
-    data_barrier<data_type> create_barrier(const std::initializer_list<int> &target_machines, int size_x, int granularity, cl_context context);
+    data_barrier<data_type> CreateBarrier(int size_x, int granularity, cl_context context, const init_list &target_machines);
 
     template <typename data_type>
     cl_int EnqueueWriteBuffer(cl_command_queue command_queue,
@@ -185,13 +185,7 @@ public:
     cl_int Finish (   cl_command_queue command_queue,
                       init_list target_machines);
 
-    // clCreateBuffer
-    // clSetKernelArg(
-    // clGetKernelWorkGroupInfo
-
-
-    int my_id, root_process, num_processes;
-    MPI_Status status;
+    int world_rank, root_process, world_size;
     int tag_value;
 
 
@@ -204,7 +198,7 @@ public:
 //----------------------------------------------------------//
 //----------------------------------------------------------//
 void check_source_and_target_valid(init_list shared_machine_list, init_list target_machines, int source_machine);
-bool my_id_in_list(const init_list &shared_machine_list, int my_id);
+bool world_rank_in_list(const init_list &shared_machine_list, int world_rank);
 cl_int wait_for_distCL_event(const distCL_event *event);
 
 
@@ -222,13 +216,13 @@ void distributedCL::Init(int *argc, char ***argv)
     MPI_Initialized(&initialized);
     if (!initialized)
     {
-        ierr = MPI_Init_thread(argc, argv, MPI_THREAD_SERIALIZED, &provided);
+        ierr = MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
         //IERR CATCH
     }
 
-    ierr = MPI_Comm_rank(MPI_COMM_WORLD, &my_id);
+    ierr = MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     //IERR CATCH
-    ierr = MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
+    ierr = MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     //IERR CATCH
 }
 
@@ -244,21 +238,23 @@ void distributedCL::Finalize()
 
 
 template<typename data_type>
-data_barrier<data_type> distributedCL::create_barrier(const std::initializer_list<int> &target_machines, int size_x, int granularity, cl_context context)
+data_barrier<data_type> distributedCL::CreateBarrier(int size_x, int granularity, cl_context context, const init_list &target_machines)
 {
     int temp_tag_value = tag_value;
     tag_value += size_x / granularity + 2;
     bool id_in_list = false;
     for (auto i = begin(target_machines); i < end(target_machines); ++i)
     {
-        if (*i == my_id)
+        if(*i >= world_size)
+          std::runtime_error("Targeting non-existent machine.");
+        if (*i == world_rank)
         {
             id_in_list = true;
         }
     }
     if (id_in_list)
     {
-        return data_barrier<data_type>(target_machines, size_x, granularity, temp_tag_value, my_id, context);
+        return data_barrier<data_type>(target_machines, size_x, granularity, temp_tag_value, world_rank, context);
     }
     return data_barrier<data_type>();
 
@@ -298,7 +294,7 @@ cl_int internal_send(data_barrier<data_type> *barrier,
                      size_t chunk_offset,
                      size_t chunks_sent,
                      distCL_event *send_event,
-                     int my_id,
+                     int world_rank,
                      init_list target_machines);
 
 template <typename data_type>
@@ -322,12 +318,12 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
 
     check_source_and_target_valid(barrier->shared_machine_list, target_machines, source_machine);
 
-    if (target_machines.size() == 0)
+    if (target_machines.size() == 0 && barrier->shared_machine_list.size() != 0)
     {
         target_machines = barrier->shared_machine_list;
     }
 
-    if (my_id_in_list(target_machines, my_id) || my_id == source_machine)
+    if (world_rank_in_list(target_machines, world_rank) || world_rank == source_machine)
     {
         err = WaitForEvents(num_events_in_wait_list, event_wait_list, {});
 
@@ -348,16 +344,16 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
         cb *= sizeof(data_type);
     }
 
-    if (my_id == source_machine)
+    if (world_rank == source_machine)
     {
         if (send_event != NULL)
         {
-            err = internal_send(barrier, chunk_offset, chunks_sent, send_event, my_id, target_machines);
+            err = internal_send(barrier, chunk_offset, chunks_sent, send_event, world_rank, target_machines);
         }
         else
         {
             distCL_event temp_event;
-            err = internal_send(barrier, chunk_offset, chunks_sent, &temp_event, my_id, target_machines);
+            err = internal_send(barrier, chunk_offset, chunks_sent, &temp_event, world_rank, target_machines);
             WaitForEvents(1, &temp_event, {});
             delete [] temp_event.events;
         }
@@ -369,34 +365,28 @@ cl_int distributedCL::EnqueueWriteBuffer(cl_command_queue command_queue,
                 ++target_machine)
         {
 
-            if (*target_machine == my_id && *target_machine != source_machine)
+            if (*target_machine == world_rank && *target_machine != source_machine)
             {
 
-                distCL_event temp_event;
-                temp_event.size = 1;
-                temp_event.events = new std::shared_ptr<cl_event>[1];
                 int errcode_ret;
                 cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
-                temp_event.events[0] = std::make_shared<cl_event>(new_event);
-
-                barrier->receive_data(temp_event.events[0], source_machine);
+                std::shared_ptr<cl_event> temp_event = std::make_shared<cl_event>(new_event);
+                barrier->receive_data(temp_event, source_machine);
 
                 if (recv_event != NULL)
                 {
                     cl_event r_event;
-                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 1, temp_event.events[0].get(), &r_event);
                     recv_event->size = 1;
                     recv_event->events = new std::shared_ptr<cl_event>[1];
                     recv_event->events[0] = std::make_shared<cl_event>(r_event);
-
+                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 1, temp_event.get(), recv_event->events[0].get());
                 }
                 else
                 {
-                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 1, temp_event.events[0].get(), NULL);
+                    err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 1, temp_event.get(), NULL);
                 }
-                delete [] temp_event.events;
             }
-            else if (*target_machine == my_id && *target_machine == source_machine)
+            else if (*target_machine == world_rank && *target_machine == source_machine)
             {
                 if (recv_event != NULL)
                 {
@@ -422,7 +412,7 @@ cl_int internal_send(data_barrier<data_type> *barrier,
                      size_t chunk_offset,
                      size_t chunks_sent,
                      distCL_event *send_event,
-                     int my_id,
+                     int world_rank,
                      init_list target_machines)
 {
     int event_id = 0;
@@ -436,7 +426,7 @@ cl_int internal_send(data_barrier<data_type> *barrier,
             ++target_machine)
     {
 
-        if (*target_machine != my_id)
+        if (*target_machine != world_rank)
         {
             cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
             send_event->events[event_id] = std::make_shared<cl_event>(new_event);
@@ -490,7 +480,7 @@ cl_int internal_send(data_barrier<data_type> *barrier,
                      size_t chunks_sent,
                      std::shared_ptr<cl_event> lock,
                      distCL_event *send_event,
-                     int my_id,
+                     int world_rank,
                      init_list target_machines)
 {
     int event_id = 0;
@@ -504,7 +494,7 @@ cl_int internal_send(data_barrier<data_type> *barrier,
             ++target_machine)
     {
 
-        if (*target_machine != my_id)
+        if (*target_machine != world_rank)
         {
           
             cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
@@ -547,7 +537,7 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
         target_machines = barrier->shared_machine_list;
     }
 
-    if (my_id_in_list(target_machines, my_id) || my_id == source_machine)
+    if (world_rank_in_list(target_machines, world_rank) || world_rank == source_machine)
     {
         err = WaitForEvents(num_events_in_wait_list, event_wait_list, {});
 
@@ -566,9 +556,10 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
         cb *= sizeof(data_type);
     }
 
-    if (my_id == source_machine)
+    if (world_rank == source_machine)
     {
-        std::shared_ptr<cl_event> lock(new cl_event);
+        cl_event lock_event;
+        std::shared_ptr<cl_event> lock = std::make_shared<cl_event>(lock_event);
 
         err = clEnqueueReadBuffer (command_queue,
                                    buffer,
@@ -587,7 +578,7 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
                                 chunks_sent,
                                 lock,
                                 send_event,
-                                my_id,
+                                world_rank,
                                 target_machines);
         }
         else
@@ -598,7 +589,7 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
                                 chunks_sent,
                                 lock,
                                 &temp_event,
-                                my_id,
+                                world_rank,
                                 target_machines);
             WaitForEvents(1, &temp_event, {});
             delete [] temp_event.events;
@@ -606,9 +597,9 @@ cl_int distributedCL::EnqueueReadBuffer(cl_command_queue command_queue,
     }
     else
     {
-        if (my_id_in_list(target_machines, my_id))
+        if (world_rank_in_list(target_machines, world_rank))
         {
-            if (my_id != source_machine)
+            if (world_rank != source_machine)
             {
                 if (recv_event != NULL)
                 {
@@ -659,7 +650,7 @@ cl_int distributedCL::EnqueueNDRangeKernel(cl_command_queue command_queue,
         init_list target_machines)
 {
     cl_int err = 0;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = WaitForEvents(num_events_in_wait_list, event_wait_list, {});
         if (err != CL_SUCCESS)
@@ -712,7 +703,7 @@ cl_int distributedCL::GetPlatformIDs(    cl_uint num_entries,
         init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = clGetPlatformIDs(     num_entries,
                                     platforms,
@@ -736,7 +727,7 @@ cl_int distributedCL::GetDeviceIDs(  cl_platform_id platform,
                                      init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = clGetDeviceIDs(platform, device_type, num_entries, devices, num_devices);
     }
@@ -761,7 +752,7 @@ cl_int distributedCL::CreateContext(cl_context *context,
                                     init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         *context = clCreateContext(properties, num_devices, devices, pfn_notify, user_data, &err);
     }
@@ -780,7 +771,7 @@ cl_int distributedCL::CreateCommandQueue(  cl_command_queue *command_queue,
         init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         *command_queue = clCreateCommandQueue(context, device, properties, &err);
     }
@@ -800,7 +791,7 @@ cl_int distributedCL::CreateProgramWithSource ( cl_program *program,
         init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         *program = clCreateProgramWithSource(context, count, strings, lengths, &err);
     }
@@ -821,7 +812,7 @@ cl_int distributedCL::BuildProgram ( cl_program program,
                                      init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = clBuildProgram(program, num_devices, device_list, options, pfn_notify, user_data);
     }
@@ -839,7 +830,7 @@ cl_int  distributedCL::CreateKernel ( cl_kernel *kernel,
                                       init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         *kernel = clCreateKernel(program, kernel_name, &err);
     }
@@ -859,7 +850,7 @@ cl_int distributedCL::CreateBuffer ( cl_mem *buffer,
                                      init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         *buffer = clCreateBuffer(context, flags, size, host_ptr, &err);
     }
@@ -878,7 +869,7 @@ cl_int distributedCL::WaitForEvents(cl_uint num_events,
     cl_int err;
 
 
-    if ((my_id_in_list(target_machines, my_id) || target_machines.size() == 0) && (event_list != NULL))
+    if ((world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0) && (event_list != NULL))
     {
         for (int i = 0; i < num_events; ++i)
         {
@@ -903,7 +894,7 @@ cl_int distributedCL::SetKernelArg ( cl_kernel kernel,
 
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = clSetKernelArg(kernel, arg_index, arg_size, arg_value);
     }
@@ -920,7 +911,7 @@ cl_int distributedCL::Finish (   cl_command_queue command_queue,
                                  init_list target_machines)
 {
     cl_int err;
-    if (my_id_in_list(target_machines, my_id) || target_machines.size() == 0)
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
     {
         err = clFinish(command_queue);
     }
@@ -953,11 +944,11 @@ cl_int wait_for_distCL_event(const distCL_event *event)
     return err;
 }
 
-bool my_id_in_list(const init_list &shared_machine_list, int my_id)
+bool world_rank_in_list(const init_list &shared_machine_list, int world_rank)
 {
     for (auto i = begin(shared_machine_list); i < end(shared_machine_list); ++i)
     {
-        if (*i == my_id)
+        if (*i == world_rank)
         {
             return true;
         }
@@ -972,12 +963,12 @@ void check_source_and_target_valid(init_list shared_machine_list, init_list targ
     for (auto i = begin(target_machines);
             i < end(target_machines); ++i)
     {
-        if (!my_id_in_list(shared_machine_list, *i))
+        if (!world_rank_in_list(shared_machine_list, *i))
         {
             valid_target = false;
         }
     }
-    if (!my_id_in_list(shared_machine_list, source_machine))
+    if (!world_rank_in_list(shared_machine_list, source_machine))
     {
         throw std::runtime_error("Source machine does not share memory barrier.");
     }

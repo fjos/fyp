@@ -1,4 +1,5 @@
-
+\documentclass[../thesis.tex]{subfiles}
+\begin{document}
 \chapter{Background Theory}
 
 \label{ch:background}
@@ -36,3 +37,39 @@ Text of the Background.
         Close to Metal will only be mentioned briefly as it has been discontinued. It was, for a brief time, AMD Graphic Product Group's (then ATI's) solution to GPGPU. AMD has since switched to supporting OpenCL, thus increasing the number of platforms that utilize OpenCL as their primary method for GPGPU.
     % subsection cuda_and_close_to_metal (end)
 
+
+    \subsection{Upcoming Developments} % (fold)
+    \label{sub:upcoming_developments}
+    As it is important to be aware of the state of the field, here we will discuss some of the upcoming developments and how they will affect the work.
+        \subsubsection{OpenCL 2.0} % (fold)
+        \label{ssub:opencl_2_0}
+        OpenCL 2.0 is currently in development as the latest iteration of OpenCL. The finalized API Specification was released on November 14, 2013 and leads to some interesting changes. Shared virtual memory will be supported in OpenCL 2.0, which will allow for different kernel executions to share memory. Although this could probably be extended to a shared virtual memory layer between devices, without increased network speed this would probably be inefficient. As inefficiency is one of the things that will be fought against the most, it won't make much a difference to distributed implementations of OpenCL.
+        % subsubsection opencl_2_0 (end)
+    % subsection upcoming_developments (end)
+
+    \subsection{Methodology Considered} % (fold)
+    \label{sub:methodology_considered}
+    In this section we'll briefly discuss some of the solutions considered, and their pros and cons.
+        \subsubsection{Disguising Distance} % (fold)
+        \label{ssub:disguising_distance}
+            One possibility for implementing distributed OpenCL is to disguise the fact that compute devices are on separate nodes, and allow the OpenCL program to view all compute devices on a network as a local compute device. The advantage of this is that writing an OpenCL application for this type of an environment is trivial; all devices in a computer cluster will appear to be available locally, and all memory transfers are hidden from the user. This allows for a competent OpenCL programmer to write a program for a distributed environment with standard OpenCL API functions.
+
+            There are, however, issues with this implementation. The chief of which is that it functions in a typical Master/Slave configuration; one machine controls what data and commands are passed, and to where. It does not easily allow for data transference between sister nodes, and thus the data flow paths are limited.
+
+            It is a solution that is ideal for most tasks where the computation simply needs to be split between machines, and has been successfully implemented by researchers at Seoul National University\cite{Kim:2012:SOF:2304576.2304623}.
+        % subsubsection disguising_distance (end)
+        \subsubsection{Function Wrapping} % (fold)
+        \label{ssub:function_wrapping}
+            The method that will be used within this project is to create function wrappers for all the functions, defining origins and destinations for the data. Take, for example, you wish to load data from one machine onto another. Ordinarily this would involve multiple calls of MPI\_Send and MPI\_Recv in order to pass the size of the data, and then the data itself. The hope is to hide all of the sends and receives from the user, and allow them to use invocations very similar to OpenCL itself.
+
+            This will require more thought on the programmers behalf, because they will need to understand how their data flows and where and when things need to execute, but it helps reduce how much thought they have to put into programming the data exchange.
+
+            Both this and the previous solution are only applicable to local computing, where one can control all the machines that will be running the processes.
+        % subsubsection function_wrapping (end)
+        \subsubsection{High Throughput Computing} % (fold)
+        \label{ssub:high_throughput_computing}
+            A final thought will be given to High Throughput Computing, a type of computing meant more to take advantage of the computational power available to a large community. It's distributed computing that can more often be measured in months, less than high speed computational needs. It tackles the challenges of distributed computing by simply not having communication between individual devices, and simply returning results to the main system. Although some thought was given to implementing a framework for this, it is less measurable without a large community backing it, and proven solutions exist that have already implemented OpenCL\cite{boinc}. 
+        % subsubsection high_throughput_computing (end)
+    % subsection methodology_considered (end)
+
+\end{document}

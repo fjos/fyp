@@ -1,4 +1,4 @@
-\documentclass[report.tex]{subfiles}
+\documentclass[../thesis.tex]{subfiles}
 \begin{document}
 \section{Event Based Programming} % (fold)
 \label{sec:event_based_programming}
@@ -96,32 +96,29 @@
 
     \subsection{distCL\_event Usage} % (fold)
     \label{sub:distcl_event_usage}
-        One of the goals in creating distCL\_event was to stay as true as possible to the OpenCL event model. In the original event iteration, there was a wrapper containing a vector of distCL\_events. This was first created with the thought of allowing a simpler usage of events; simply pass one object by reference and the rest would be taken care of. Unfortunately, events were used and modified asynchronously. This unfortunately led to some situations where pointers would be invalidated by the changing vector, how this happens can be seen below.
+        In the original iteration of managing distCL\_events, the thought was to reduce the complexity of the OpenCL event model; by passing in a struct wrapping a container of distCL\_events, perhaps to be known as distCL\_event\_list, the hope was to provide a simpler solution to OpenCL events. Instead of passing a pointer to the cl\_event, you'd pass in an entire event list, which would append events as needed. At first this was done using a vector, but as previously mentioned, vectors sometimes are reallocated which invalidates the reference passed. In a situation where multiple events were created from the sends, this could very well be unsafe. The solution to this was, as mentioned in the design section, a std::list. Unfortunately, this actually led to more ambiguity, and ultimately led to code that was, in general, less appealing.
 
-        GUYS FIGURE HERE FOR MUTEXTHINGY
+        Instead, after some thought, it made sense to hold true to the OpenCL model of event\_wait\_lists just being arrays of events. This had the added benefit of holding more true to the original OpenCL model. As the desire was for distributedCL to actually be useful to OpenCL programmers, it made sense to retain a standard that was known. As such, distributedCL, for the most part, allows the replacement of a cl\_event with a distCL\_event. The differences between waiting for a cl\_event and distCL\_event can be seen in Figure~\ref{fig:difference_between_wait_cl_and_wait_distCL}.
 
-        Instead of adding additional levels of complication by dealing with mutexes, it was much easier to switch to using std::list; a solution that should have been readily apparent from the start. Because there was no longer a danger of reallocation when modifying the container, thread safety was far easier to guarantee.
-        
-        It should be noted: the decision to switch from a vector to a standard array was made prior to the all events being shared\_ptrs to cl\_events. A large part of the danger of vectors could have been mitigated by using shared\_ptrs, thus removing any need to pass by reference.
+        \begin{figure}[htbp]
+            \centering
+            \lstset{language=cpp}
+            \begin{lstlisting}[tabsize=2]
+            //Standard OpenCL clWaitForEvents call
+            clWaitForEvents(cl_uint num_events_in_list, cl_event * event_wait_list)
+            
+            // distributedCL WaitForEvents
+            // target_machines provides a list of machines that WaitForEvents acts upon
+            distributedCL::WaitForEvents(cl_uint num_events_in_list, distCL_event * event_wait_list, init_list target_machines)
+            \end{lstlisting}
+            \caption{Difference Between OpenCL and distributedCL WaitForEvents}
+            \label{fig:difference_between_wait_cl_and_wait_distCL}
+        \end{figure}
 
-        This meant that when the change to using solely cl\_event and std::shared\_ptr was made, there was the possibility of returning to using std::vector. This idea was, however, discarded. There was no reason to return to a less safe structure. There was only one problem left; using the list led to far more indirect handling of events, and a reduction in the clarity of code. 
-
-        It was for this reason that the idea of reducing involvement in creating a list of events was reconsidered. This reevaluation led to the abandonment of containers and the return to the event model used in OpenCL; a pointer to the head of an array of events and the number of items in the array.
-
-        Thus the usage of event based synchronization ended up being very similar to that of OpenCL's original model. This can be seen below in one of the simplest event based synchronization calls; clWaitForEvents.
-
-        \begin{lstlisting}
-        //Standard OpenCL clWaitForEvents call
-        clWaitForEvents(cl_uint num_events_in_list, cl_event * event_wait_list)
-        
-        // distributedCL WaitForEvents
-        // target_machines provides a list of machines that WaitForEvents acts upon
-        distributedCL::WaitForEvents(cl_uint num_events_in_list, distCL_event * event_wait_list, init_list target_machines)
-        \end{lstlisting}
-
-        This behaviour holds true in the many OpenCL functions that can take events; a pointer to the set of events and the number of events to wait on.
-
+        These functions are very similar, both in syntax and usage. And that was the goal of developing this way, to reduce the effort of adapting standard OpenCL code to a distributed system. The chief difference between these two is the final variable in the distributedCL function call, target machines. This allows for the call to only affect those machines that are targeted, but this will be discussed more in depth in the next section.
     % subsection distcl_event_usage (end)
+
+The OpenCL event model is very useful for providing synchronization and allowing machines to run independently without blocking. By keeping the principles of OpenCL's event based system, the code provided allows for easily creating complex multi machine command queues, without worrying about deadlocks. Any data dependency can easily be handled by the distCL\_event.
 
 % section event_based_programming (end)
 

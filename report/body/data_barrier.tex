@@ -1,4 +1,4 @@
-\documentclass[thesis.tex]{subfiles}
+\documentclass[../thesis.tex]{subfiles}
 \begin{document}
 
 \section{data\_barrier Class} % (fold)
@@ -47,7 +47,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
   \end{figure}
    
 
-  \subsubsection{\lstinline[language=cpp]{template <typename data\_type>}} % (fold)
+  \subsubsection{template <typename data\_type>} % (fold)
   \label{ssub:template_typename_data_type}
     data\_barrier is, itself, a templated class. The motivation behind this is quite straightforward; reduce the amount of needless repetition of code. It would have been quite possible to write a different data\_barrier class for each of the possible OpenCL data\_types. Unfortunately, that would be a hugely wasteful use of time, the code would be practically the same for every single possible data\_type, with very minor variations. This would have led to an explosion of code; with more than ten possible data\_types \cite{opencldatatypes} in OpenCL 1.2, it made sense not to have so much duplication within the code. Thus data\_barrier was a templated class, and all it's internal functions are templated as well.
 
@@ -75,7 +75,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
     \end{figure}
   % subsubsection template_typename_data_type (end)
   
-  \subsubsection{\texttt{init\_list \&machines}} % (fold)
+  \subsubsection{init\_list \texttt{\&}machines} % (fold)
   \label{ssub:init_list}
     The next component of the constructor, and one of the most important, is the init\_list. Init\_list is simply a macro for \newline\texttt{std::initializer\_list<int> \&machines}, a templated standard C\texttt{++} class, in this case with type integer. The purpose behind it's use is readily apparent once seen; it is used to easily allow the programmer to declare a list of integers defining the machines that the data\_barrier will target.
 
@@ -114,7 +114,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
     The value `machines' is stored within the data member shared\_machine\_list, which is used by many functions to quickly check if the machine listed is valid to be targeted by a function call.
   % subsubsection init_list (end)
 
-  \subsubsection{\texttt{int size\_x}} % (fold)
+  \subsubsection{int size\_x} % (fold)
   \label{ssub:int_size_x}
       The next component in the constructor is size\_x. As can be seen in Figure~\ref{fig:data_barrier_constructor}, size\_x is used in three data members; \texttt{data\_type * data}, \texttt{int data\_size}, and \texttt{int number\_chunks}.
 
@@ -125,7 +125,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
       Additionally, there is \texttt{data\_type * previous\_data}, an array of size data\_size used for determining what data needs to be sent during a synchronization event.
   % subsubsection int_size_x (end)
 
-  \subsubsection{\texttt{int granularity}} % (fold)
+  \subsubsection{int granularity} % (fold)
   \label{ssub:int_granularity}
     Granularity follows very closely on \texttt{int data\_size}'s heels; it determines the granularity with which data transfers are correct to. It essentially divides \texttt{data\_type * data} into a series of chunks of a given size, which is stored within data\_barrier as \texttt{int chunk\_size}.
 
@@ -180,22 +180,22 @@ The first aspect of the data\_barrier class that will be examined at are its dat
     \end{figure}
   % subsubsection int_granularity (end)
 
-  \subsubsection{\texttt{int tag\_value}} % (fold)
+  \subsubsection{int tag\_value} % (fold)
   \label{ssub:int_tag_value}
     Tag\_value has a relatively straightforward usage; it provides a tag so that there are no collisions between messages. OpenMPI is used for data transfers, and one of the parameters for sending messages is the message tag. By assigning a unique value to message\_tag via tag\_value, we can assure that there will be no collisions between messages from different data\_barriers. Choosing the tag\_value is actually hidden away from the user by the distributedCL class, however there will be more discussion on that later.
   % subsubsection int_tag_value (end)
 
-  \subsubsection{\texttt{int id}} % (fold)
+  \subsubsection{int id} % (fold)
   \label{ssub:int_id}
     The id is a very simple matter, it's simply the unique id assigned to a machine when initializing OpenMPI. Thus any functions called by data\_barrier can know what machine they are operating on by looking at the data member machine\_id, without having to pass in that information repeatedly.
   % subsubsection int_id (end)
 
-  \subsubsection{\texttt{cl\_context context}} % (fold)
+  \subsubsection{cl\_context context} % (fold)
   \label{ssub:cl_context_context}
     Finally, we have the cl\_context. This variable was not always included, until the final decision on how events were supposed to work was made. Because the desire was to ensure proper ordering of instructions using only OpenCL events, it was important to include this value. In order to create an event in OpenCL, one must supply a cl\_context for the event. As the various send and receive commands rely upon the creation of cl\_events, it was important to have a simple way to produce these events without needlessly supplying the context repeatedly.
   % subsubsection cl_context_context (end)
 
-  \subsubsection{\texttt{cl\_mem buffer}} % (fold)
+  \subsubsection{cl\_mem buffer} % (fold)
   \label{ssub:cl_mem_buffer} 
 
   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
@@ -211,7 +211,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 \label{sub:member_functions}
   The data barrier class has a few underlying functions, but they can be divided up into two categories; functions for sending, and functions for receiving. In order to better understand how the functions behave currently, we'll look first into how the data transfer actually happens.
 
-  \subsubsection{\texttt{MPI\_ISend and MPI\_Irecv}} % (fold)
+  \subsubsection{MPI\_ISend and MPI\_Irecv} % (fold)
   \label{ssub:mpisend_and_mpi_recv}
     In order to transfer data, both the sender and receiver must know what data is to be transfered. Originally, it was assumed that every single time data was to be transferred between machines, all of the data would be sent at once. This sort of behavior can be seen in Figure~\ref{fig:async_send_recv}, showing an asynchronous send and receive that allows for the full transference of data.
 
@@ -256,7 +256,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
     \lstinline[language=cpp]{convert_type(get_abstraction_data_type<int>()}. This works for all supported data types, and allows all sends and receives to work as expected.
   % subsubsection mpi_datatypes (end)
 
-  \subsubsection{\texttt{Send and Receive with Granularity}} % (fold)
+  \subsubsection{Send and Receive with Granularity} % (fold)
   \label{ssub:send_and_receive_with_granularity}
   
     When it came time to switch to ensuring data coherence at a granular scale, the problem wasn't changed overly much. This can be seen in Figure~\ref{fig:async_send_recv_using_chunks}.
@@ -306,7 +306,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
     % subsubsection send_and_receive_with_granularity (end)
 
-  \subsubsection{\texttt{Synchronization Events}} % (fold)
+  \subsubsection{Synchronization Events} % (fold)
   \label{ssub:synchronization_events}
     
     Having mentioned synchronization events, it's important to explain what exactly is meant by a synchronization event. A synchronization event is when all the machines that share a specific data barrier exchange information such that they have up to date information from all other machines in the group.
@@ -375,7 +375,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
    % subsubsection synchronization_events (end)
 
-  \subsubsection{\texttt{Asynchronous Send for Arbitrary Chunks}} % (fold)
+  \subsubsection{Asynchronous Send for Arbitrary Chunks} % (fold)
   \label{ssub:asynchronous_send_for_arbitrary_chunks}
    
 
@@ -468,7 +468,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
   % subsubsection asynchronous_send_for_arbitrary_chunks (end)
 
-  \subsubsection{\texttt{Threading the Receive Function}} % (fold)
+  \subsubsection{Threading the Receive Function} % (fold)
   \label{ssub:threading_the_receive_function}
       
     It was therefore decided to move to threaded receives. By having the receive function within a thread, the problem of a blocking receive was nullified, for it would only be blocking upon that thread.
@@ -487,7 +487,7 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
   % subsubsection threading_the_receive_function (end)
 
-  \subsubsection{\texttt{Threading the Send Function}} % (fold)
+  \subsubsection{Threading the Send Function} % (fold)
   \label{ssub:threading_the_send_function}
     Upon the completion of the threaded receive, it felt as if it was finished. Already the send side was completely asynchronous, and it didn't seem to require any more work. This, however, was incorrect. It became readily apparent when writing the wrapper functions for various OpenCL commands, that simply calling the sends asynchronously would not be enough.
 

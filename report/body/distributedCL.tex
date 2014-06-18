@@ -1,0 +1,396 @@
+\documentclass[../thesis.tex]{subfiles}
+\begin{document}
+\section{distributedCL} % (fold)
+\label{sec:distributedcl}
+
+All of the previous work has been building up to this final class; distributedCL. This class serves as the source of all the OpenCL calls, as well as the manager for various aspects of MPI. By examining its development and the various functions it provides, one can gain a better insight into how the final product actually works.
+
+In this vein, the discussion of the class has been divided into a few components; the initial reasoning behind the class and the changes it underwent throughout development, how it is used in conjunction with the data barrier class and, finally, how it reached its final state, the container of all the OpenCL functions.
+\subsection{MPI Initialization} % (fold)
+\label{sub:mpi_initialization}
+    MPI\_Init and MPI\_Finalize are two functions that must be called when running an MPI\_Execution environment.
+
+    Given that any program running MPI commands needs to call these two functions at some point, and this project attempted to abstract as far away as possible from the actual communications, it made sense to wrap the functions within to hide them from the user. As such there a few functions within the class dedicated to doing solely that. 
+
+    The first is actually the constructor. If you provide the constructor with references to command line arguments (distributedCL(int *argc, char ***argv)), MPI\_Init will be called by another function, Init(int *argc, char ***argv). Otherwise, an empty initialization can be used, with Init being called at your leisure.
+
+    When it was said that MPI\_Init is called, that was actually a bit misleading. An MPI initialization call was made, however the generic MPI\_Init allows only single threaded MPI programs. As such, when the send and receive functions were changed to be threaded, MPI\_Init had to be changed to MPI\_Init\_thread. MPI\_Init\_Thread is a function that allows for different levels of threading in an MPI based program. In this case, MPI\_THREAD\_MULTIPLE is used, which allows multiple threads to make MPI calls with no restrictions.
+
+    The other function is Finalize(). Upon the completion of all commands in the program, Finalize must be invoked to allow MPI\_Finalize to be called.
+
+    As long as distributedCL is initialized at the beginning of a program, and finalized at the end, the MPI portions of the program should behave correctly.
+
+    In addition to initializing MPI, the initialization function makes two more MPI calls. By calling the following two functions, we set the values of some distributedCL values (world\_size and world\_rank) this provides the id of the machine to the program (used when transferring data), as well as how many machines are available in total.
+
+    \lstset{language=cpp}
+    \begin{lstlisting}[tabsize=2]
+ierr = MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+//IERR CATCH
+ierr = MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+//IERR CATCH
+    \end{lstlisting}
+
+    Their use will be discussed in more detail briefly. Also, before continuing on, it's worth noting that process and machine are used interchangeably. That is because MPI does not care if it runs on multiple machines or one. For the most part, each process would have its own machine, but it's also possible to run a whole MPI program of 8 processes on a single machine.
+
+% subsection mpi_initialization (end)
+
+\subsection{data\_barrier Factory} % (fold)
+\label{sub:data_barrier_factory}
+    The next role that the distributedCL class took on was as a data\_barrier factory. As discussed earlier, data\_barriers take quite a few values in their construction. By looking at the CreateBarrier, we can see how the the aforementioned values world\_size and world\_rank are used, and the other aspects of data\_barrier creation that are taken care of.
+
+    \begin{figure}[htbp]
+        \centering
+        \lstset{language=cpp}
+        \begin{lstlisting}[tabsize=2]
+template<typename data_type>
+data_barrier<data_type> distributedCL::CreateBarrier(int size_x, int granularity, cl_context context, const init_list &target_machines)
+{
+    int temp_tag_value = tag_value;
+    tag_value += size_x / granularity + 2;
+    bool id_in_list = false;
+    for (auto i = begin(target_machines); i < end(target_machines); ++i)
+    {
+        if(*i >= world_size)
+          std::runtime_error("Targeting non-existent machine.");
+        if (*i == world_rank)
+        {
+            id_in_list = true;
+        }
+    }
+    if (id_in_list)
+    {
+        return data_barrier<data_type>(target_machines, size_x, granularity, temp_tag_value, world_rank, context);
+    }
+    return data_barrier<data_type>();
+}
+        \end{lstlisting}
+        \caption{data\_barrier factory function}
+        \label{fig:createbarrier_function}
+    \end{figure}
+
+    \subsubsection{world\_rank and world\_size} % (fold)
+    \label{ssub:world_rank_and_world_size}
+        The first thing to be discussed is the use of world\_rank and world\_size. World\_rank is a value that defines the rank of the process on the communication MPI\_COMM\_WORLD. MPI\_COMM\_WORLD is the generic communicator used for all processes; it can be used to communicate with all processes created when running the program. World\_size is simply the total number of processes created.
+
+        If you remember the data\_barrier constructor, world\_rank's use should be relatively obvious: the data\_barrier needs a machine\_id associated with it, which translates directly to world\_rank. Thus the distributedCL class passes the rank of the machine to data\_barrier for the reasons mentioned before; easy access to this value simplifies communication.
+
+        Additionally, world\_rank serves another role. As can be seen in Figure~\ref{fig:createbarrier_function}, world\_rank is used by each process to determine if one of the machines listed in target\_machines refers to that process. If it does, it returns a fully constructed data\_barrier. Otherwise it returns an empty shell.
+
+        It's also relatively easy to see how world\_size is used; by looking at line 9 of Figure~\ref{fig:createbarrier_function}, you can see that world\_size is used to determine if a targeted process is out of scope. If you attempted to refer to process 5 in a run that initialized only 4 processes, it would quickly return an error.
+    % ssubsection world_rank_and_world_size (end)
+
+    \subsubsection{Tags} % (fold)
+    \label{ssub:tags}
+        The next, and final, aspect that the factory function manages is tags. As mentioned earlier, every MPI point to point communication requires a tag specifying which transaction it refers to. To facilitate in this goal, every data\_barrier created with it is given a tag value which allows all of its communications to remain unique.
+
+        If you refer back to Figure~\ref{fig:final_send_receive}, you can see that sending information requires two initial transfers (the number of chunks being sent, and then the vector of chunk ids), followed by transferring all the actual chunks. As such, given a situation such that all the chunks in data\_barrier are being transferred, a single send could utilize the number\_of\_chunks + 2 tags.
+
+        Thus every time a new data\_barrier is created, the number of chunks is calculated and the tag value count is incremented by the number of chunks + 2. This ensures no collision of tags between different data\_barriers.
+
+        As we've now discussed the way tags are determined, we can discuss a bit more on how exactly tags are determined for a send. Essentially, it's what we've mentioned: tag\_value + chunk\_id or appropriate offset. There is just one small addition; using the target and source machine's machine\_id multiplied by two predefined values, we can ensure that there is no contesting of tag values during sends. 
+        
+        Additionally, because there is a limitation to the granularity that can be assured (MPI communication functions do have an overhead, and transferring in too many chunks leads to a noticeable slowdown), there is no danger of tags reaching the size of the offset provided by the machine\_ids.
+
+        The only current issue is if multiple sends occur between the same two machines. Future work will involve a send cycle, allowing any number of sends to take place at the same time.
+    % subsubsection tags (end)
+
+    \subsubsection{Usage} % (fold)
+    \label{ssub:usage}
+        The factory function can be used in practically the same way as the constructor; in Figure~\ref{fig:constructor_vs_factory} you can see the difference between the two.
+
+        \begin{figure}[htbp]
+            \centering
+            \lstset{language=cpp}
+            \begin{lstlisting}[tabsize=2]
+//Constructor
+data_barrier<float> barrier = data_barrier<float>(target_machines, size_x, granularity, tag_value, distributedCL.world_rank, context);
+
+//Factory function
+data_barrier<float> outputbarrier = distributedCL.CreateBarrier<float>(size_x, granularity, context, target_machines);
+            \end{lstlisting}
+            \caption{caption}
+            \label{fig:constructor_vs_factory}
+        \end{figure}
+    % subsubsection usage (end)
+
+    The factory function takes away any of the thinking that might need to be done for sends and receives, and as such is the preferred method for creating an instance of the data\_barrier class.
+
+% subsection data_barrier_factory (end)
+
+\subsection{Modified OpenCL} % (fold)
+\label{sub:modified_opencl}
+    When it came time to start writing the OpenCL functions, it was decided that, in order to keep everything mostly together, to make all the functions member functions of the distributedCL class. Instead of having multiple namespaces, once an instance of the distributedCL class is created, all the calls can be easily made.
+
+    In this section, we will look at the three different types of OpenCL functions we encountered as well as discuss the reasoning for any changes made. We'll start by looking at the simple distributedCL functions that very closely resemble their OpenCL counterparts, functions made with very minimal change to the method of calling. Then we'll move on to the OpenCL functions that have had their method of calling modified, to better support the goals of distributed programming. Finally, we'll discuss the functions that were more involved; ones that involve actual transfers of data.
+
+    \subsubsection{Straightforward Conversions} % (fold)
+    \label{ssub:straightforward_conversions}
+        The reason these OpenCL functions were so easy to make distributed is they simply return an error and involve no communication. These are the processes such as clFinish() and clGetPlatformIDs they return a cl\_int and any modifications to data are done so by reference.
+
+        As such, the wrapping function is easy, it's the same function call with the addition of an extra variable, init\_list target\_machines.
+
+        The actual wrapping is simple, as can be seen in Figure~\ref{fig:distcl_getplatformids}, the code for distributedCL::GetPlatformIDs.
+
+        \begin{figure}[htbp]
+            \centering
+            \lstset{language=cpp}
+            \begin{lstlisting}[tabsize=2]
+cl_int distributedCL::GetPlatformIDs(cl_uint num_entries,
+        cl_platform_id *platforms,
+        cl_uint *num_platforms,
+        init_list target_machines)
+{
+    cl_int err;
+    if (world_rank_in_list(target_machines, world_rank) || target_machines.size() == 0)
+    {
+        err = clGetPlatformIDs(     num_entries,
+                                    platforms,
+                                    num_platforms);
+    }
+    else
+    {
+        err = CL_SUCCESS;
+    }
+    return err;
+}
+            \end{lstlisting}
+            \caption{Function wrapping for clGetPlatformIDs}
+            \label{fig:distcl_getplatformids}
+        \end{figure}
+
+    All the parameters are passed the same way, and if the world\_rank is found within the list of targeted machines, it calls clGetPlatformIDs, a standard OpenCL function. If the machine is not targeted, it returns the standard CL\_SUCCESS for a successfully completed processing. Thus error checking can be done on all machines, without worrying that a machine that didn't execute the previous command had it fail.
+
+    The section of the if statement `|| target\_machines.size() == 0' is for the specific case where you wish for the call to be performed on all machines. Figure~\ref{fig:universal_target} shows how to utilize this ability, showing the difference in targeting only the machine of rank 1 and targeting all machines.
+
+    \begin{figure}[htbp]
+        \centering
+        \lstset{language=cpp}
+            \begin{lstlisting}[tabsize=2]
+// target one machine
+ierr = distributedCL.GetPlatformIDs(num_entries, &platforms, &num_platforms, {1});
+// target all machines
+ierr = distributedCL.GetPlatformIDs(num_entries, &platforms, &num_platforms, {});
+            \end{lstlisting}
+        \caption{Targeting All Machines}
+        \label{fig:universal_target}
+    \end{figure}
+
+    By leaving the initializer list empty, it is implied that the function is to be called for all machines running the program.
+    % subsubsection straightforward_conversions (end)
+    \subsubsection{Modified Methods} % (fold)
+    \label{ssub:modified_methods}
+        Unfortunately, not all OpenCL methods are so nice with returning errors. Some, such as clCreateContext or clCreateKernel take a reference to the error as a parameter, returning either a cl\_context or cl\_kernel. This is the case for quite a few of the methods, which caused issues when trying to allow for distributed use.
+
+        If the function was wrapped in the same way as those with straightforward conversions, it would be impossible to give unique values to each.
+
+        Say, for example, you wished to have two machines perform different operations on the same data set. If the distributed version of clCreateKernel was done as a straightforward conversion, you'd have to have two separate kernels created. Otherwise, as seen in Figure~\ref{fig:kernel_clash}, the kernel would be modified for both machines when you tried to set the kernel the second time.
+
+        \begin{figure}[htbp]
+            \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+// create kernel for machine 0
+kernel = distributedCL.CreateKernel (program, kernel_name, {0}, &err);
+// create kernel for machine 1
+kernel = distributedCL.CreateKernel (program, kernel_name, {1}, &err);
+                \end{lstlisting}
+            \caption{Naive DistributedCL Method Modification}
+            \label{fig:kernel_clash}
+        \end{figure}
+
+        As you can see, this method simply doesn't work. The first sets the kernel to NULL for all machines apart from 0, and the second does the same for all machines apart from 1. Instead, you'd have to divide it up into two kernels, kernel1 and kernel2, and duplicate all function calls that require the kernel as an input.
+
+        Instead of doing this, these functions were modified such that they took the return value as a parameter passed by reference. In the above example, you wished to have two machines performing the same commands, just with a different kernel. By passing the return value by reference, as seen in Figure~\ref{fig:kernel_reference}, it became possible to easily have multiple machines do different work, without having to create multitudes of variables.
+
+        \begin{figure}[htbp]
+            \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+// create kernel for machine 0
+err = distributedCL.CreateKernel (&kernel, program, kernel_name, {0}, &err);
+// create kernel for machine 1
+err = distributedCL.CreateKernel (&kernel, program, kernel_name, {1}, &err);
+                \end{lstlisting}
+            \caption{DistributedCL Method Modification}
+            \label{fig:kernel_reference}
+        \end{figure}
+
+        For all of these functions, you can modify the value on a specific machine, without worrying about effecting its status on other machines.
+    % subsubsection modified_methods (end)
+
+    \subsubsection{Methods Involving Data Transfer} % (fold)
+    \label{ssub:methods_involving_data_transfer}
+        In this section we get to most in depth methods, and the ones that we have been building up to this time. These are the methods that involve actual data on a computation device; ones that manipulate memory objects. We discuss two functions that have been implemented, and how they integrate some of the previously mentioned work. These are some of the most drastically modified functions and have changed the most from the original OpenCL functions.
+
+        \paragraph{distributedCL::EnqueueWriteBuffer} % (fold)
+        \label{par:clenqueuewritebuffer}
+            This was the first method implemented, and was the one responsible for the change to threaded receives. The reasoning for this will become apparent in a moment, but first consider the difference between the function prototype for clEnqueueWriteBuffer and distributedCL::EnqueueWriteBuffer in Figure~\ref{fig:function_proto_compare_write}.
+
+            \begin{figure}[htbp]
+                \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+cl_int clEnqueueWriteBuffer(cl_command_queue command_queue,
+    cl_mem buffer,
+    cl_bool blocking_write,
+    size_t offset,
+    size_t cb,
+    const void *ptr,
+    cl_uint num_events_in_wait_list,
+    const cl_event *event_wait_list,
+    cl_event *event);
+
+template <typename data_type>
+cl_int EnqueueWriteBuffer(cl_command_queue command_queue,
+    cl_mem buffer,
+    cl_bool blocking_write,
+    size_t offset,
+    size_t cb,
+    data_barrier<data_type> *barrier,
+    size_t barrier_offset,
+    cl_uint num_events_in_wait_list,
+    const distCL_event *event_wait_list,
+    distCL_event *send_event,
+    distCL_event *recv_event,
+    int source_machine,
+    init_list target_machines);
+                \end{lstlisting}
+            \caption{Function Prototype Comparison}
+            \label{fig:function_proto_compare_write}
+            \end{figure}
+
+            As you can see, there are quite a few differences between the two, with the distCL version requiring a few extra variables. Before we get in to the extra variables, we will cover the variables that don't mean quite the same thing.
+
+            Until size\_t cb, all the variables can be used in the exact same way. However, due to the explicit inclusion of type within the data\_barrier class that is passed in, cb refers to the length of the array that you wish to pass in. In ordinary cl, it refers to the size that you wish to copy in bytes starting from const void *ptr. However distributedCL data\_barriers are not type agnostic, and as such allow you to refer to the size to be copied in number of elements.
+
+            The difference present with passing in data\_barrier is obvious; barrier contains the methods required for data transfers.
+
+            The variable size\_t barrier\_offset is an option variable (there is a wrapper function that calls it set to 0), that specifies the offset from which the data starts to be copied. This is meant to mimic the ability to pass a pointer to the middle of an array, in the fashion of \texttt{\&}array[barrier\_offset]. Otherwise, all data is copied from the beginning of data within data\_barrier.
+
+            Event wise, there is still the event\_wait\_list, but instead it takes distCL\_events. Additionally, it takes two event parameters, send\_event and receive\_event. This is because the send and receive events are drastically different, and where it may be required to wait for a receive, it is not necessary to wait for a send.
+
+            Finally, we have int source\_machine and init\_list target\_machines. These allow us to target multiple machines as the final data location; writing to a specified buffer on all target machines. The reasoning for not solely having a single target machine is that sometimes it is worthwhile to pass the same data to multiple machines, each to manipulate it in a different fashion. By providing the ability to set multiple targets, there is less work required when performing an operation of this sort.
+
+            Now we will cover the actual internal implementation of EnqueueWriteBuffer. The first step is checking that the source and targets are valid; if they target a machine that does not contain the allocated data they will fail. 
+
+            In the other functions, if the target machines is empty, it is assumed to target all machines running the process. In this situation, it is handled slightly differently; it targets all machines that share the data\_barrier.
+
+            From there, for all machines targeted it calls WaitForEvents upon the event list passed in.
+
+            After checking that the offsets align with the granularity, it calculates the number of chunks to be sent and the offset, in chunks.
+
+            It then splits into what are, essentially, two different functions; sending and receiving. If it is the source machine, it calls a send function that, if provided, sets an event. It initializes the distCL\_event shared\_ptr array with the size equal to the size of the target\_machines list. From there, for each of the target machines it creates a cl\_event and calls the data\_barrier send function, passing in the event to be set to complete upon the finalization of the send. The exception being if it the source\_machine equals the target\_machine, where it does nothing except decrement the size of the shared\_ptr array.
+
+            If there is no event provided, it creates a local distCL\_event `temp\_event', and passes it in place of the provided send\_event. It then calls WaitForEvents on the temp event, and then deletes it.
+
+            The receive half is more interesting, and can be seen in Figure~\ref{fig:receive_and_wait}. For each of the machines specified in target machines it performs the following actions. It first creates a temporary event; which is passed to the receive\_data function. This event is then used as the clEnqueueWriteBuffer's event\_wait\_list, meaning that before it writes to the buffer, it waits for the receive to complete.
+
+            \begin{figure}[htbp]
+                \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+int errcode_ret;
+cl_event new_event = clCreateUserEvent(barrier->context, &errcode_ret);
+std::shared_ptr<cl_event> tmp_event = std::make_shared<cl_event>(new_event);
+barrier->receive_data(tmp_event, source_machine);
+
+cl_event r_event;
+recv_event->size = 1;
+recv_event->events = new std::shared_ptr<cl_event>[1];
+recv_event->events[0] = std::make_shared<cl_event>(r_event);
+err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &barrier->data[barrier_offset], 1, tmp_event.get(), recv_event->events[0].get());
+
+                \end{lstlisting}
+                \caption{Receive and Wait Before Write}
+                \label{fig:receive_and_wait}
+            \end{figure}
+
+            If the source machine is a targeted machine, it simply calls clEnqueueWriteBuffer. If a receive event has been provided, it is used as the event parameter for clEnqueueWriteBuffer, as seen in the figure.
+        % paragraph clenqueuewritebuffer (end)
+
+        \paragraph{clEnqueueReadBuffer} % (fold)
+        \label{par:clenqueuereadbuffer}
+            The next function works in precisely the same way as clEnqueueWriteBuffer, working in the opposite direction. As seen in Figure~\ref{fig:write_vs_read}, the parameters in clEnqueueReadBuffer are the same as in clEnqueueWriteBuffer for the same reasons as provided above. In this situation, however, it is reading from the buffer of one machine and passing it to multiple others.
+        
+            \begin{figure}[htbp]
+                \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+template <typename data_type>
+cl_int EnqueueReadBuffer(cl_command_queue command_queue,
+    cl_mem buffer,
+    cl_bool blocking_read,
+    size_t offset,
+    size_t cb,
+    data_barrier<data_type> *barrier,
+    size_t barrier_offset,
+    cl_uint num_events_in_wait_list,
+    const distCL_event *event_wait_list,
+    distCL_event *send_event,
+    distCL_event *recv_event,
+    int source_machine,
+    init_list target_machines);
+
+template <typename data_type>
+cl_int EnqueueWriteBuffer(cl_command_queue command_queue,
+    cl_mem buffer,
+    cl_bool blocking_write,
+    size_t offset,
+    size_t cb,
+    data_barrier<data_type> *barrier,
+    size_t barrier_offset,
+    cl_uint num_events_in_wait_list,
+    const distCL_event *event_wait_list,
+    distCL_event *send_event,
+    distCL_event *recv_event,
+    int source_machine,
+    init_list target_machines);
+                \end{lstlisting}
+            \caption{Write Buffer vs Read Buffer}
+            \label{fig:write_vs_read}
+            \end{figure}
+
+            Functionally, it's also very similar to EnqueueWriteBuffer. It goes through the same checks to ensure that it is a targeted machine, treats an empty target\_machine list in the same fashion, and checks the granularity as well.
+
+            The difference begins in the send. Obviously, before sending, the data needs to be read from the machine. The method for doing this is quite similar to the method of ensuring the receive completed prior to writing, and can be seen in Figure~\ref{fig:read_before_send}.
+
+            \begin{figure}[htbp]
+                \centering
+                \lstset{language=cpp}
+                \begin{lstlisting}[tabsize=2]
+ cl_event lock_event;
+std::shared_ptr<cl_event> lock = std::make_shared<cl_event>(lock_event);
+
+err = clEnqueueReadBuffer (command_queue,
+                buffer,
+                blocking_read,
+                offset,
+                cb,
+                &barrier->data[barrier_offset],
+                0,
+                NULL,
+                lock.get());
+
+err = internal_send(barrier,
+                chunk_offset,
+                chunks_sent,
+                lock,
+                send_event,
+                world_rank,
+                target_machines);
+                \end{lstlisting}
+            \caption{Send Lock}
+            \label{fig:read_before_send}
+            \end{figure}
+
+            In this, a cl\_event is created, but not initialized. It is then passed as the event to be returned from clEnqueueReadBuffer, and passed into an internal send function. This is the same as is done in write, however this send takes an additional parameter; a cl\_event known as `lock'. It then uses the send function mentioned in data\_barrier that waits for the lock to complete before sending. Upon the completion of the lock event, the send proceeds as normal, returning events in the same way as write.
+
+            From the receive side, it simply returns the recv\_event as the actual cl\_event set by the receiving thread. This is in contrast to the write, which used it as the event wait list for the actual write command.
+        % paragraph clenqueuereadbuffer (end)
+    
+    % subsubsection methods_involving_data_transfer (end)
+
+% subsection modified_opencl (end)
+
+% section distributedcl (end)
+\end{document}
