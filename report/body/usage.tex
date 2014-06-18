@@ -1,0 +1,40 @@
+\documentclass[../thesis.tex]{subfiles}
+\begin{document}
+\section{Usage} % (fold)
+\label{sec:usage}
+
+In this section we will cover usage of distributedCL.
+
+distributedCL has been tested on OS X 10.9.3, as well as Ubuntu 12.04 LTS.
+
+It has been tested using OpenCL v1.2, and OpenMPI v1.8.1.
+
+Most of the information and source code will be available soon at the github repo \url{https://github.com/fjos/fyp}.
+
+\subsection{OpenCL} % (fold)
+\label{sub:opencl_use}
+    The first requirement to running distributedCL is to have OpenCL available upon all machines you wish to target. There are many guides online for setting up OpenCL, but a good one for linux is available at Andreas Klöckner's wiki \url{http://wiki.tiker.net/OpenCLHowTo}.
+% subsection opencl_use (end)
+\subsection{OpenMPI} % (fold)
+\label{sub:openmpi}
+    The next is to ensure all machines have OpenMPI installed. You'll compile and run the program as a typical MPI program. All the information needed to prepare OpenMPI on your machines can be found at \url{http://www.open-mpi.org/}.
+% subsection openmpi (end)
+
+\subsection{Coding with distributedCL} % (fold)
+\label{sub:coding_with_distributedcl}
+    OpenCL code can be almost directly transcribed to distributedCL code, with a few caveats.
+    \begin{enumerate}
+    \item A distributedCL program must always start with the construction of an instance of the distributedCL class (at least before any other distributedCL functions can be called)
+    \item A distributedCL program must always terminate with a call to distributedCL::Finalize
+    \item All distCL\_events that have been passed into a function must have distributedCL::WaitForEvents called on them prior to distributedCL::Finalize
+    \item All distributedCL functions return errors as a cl\_int, OpenCL functions that ordinarily return alternatives instead take a reference to that object as the first parameter
+    \item In place of void pointers for data in read and write commands, you must pass a pointer to a data\_barrier
+    \item Functions that involve cross process communications allow for two events (send and receive) as opposed to the standard one
+    \end{enumerate}
+    
+    Other than that, any CL function needed is provided by the distributedCL class. For the most part, apart from some of the above mentioned cases, it's enough to initialize distributedCL as dCL and replace the `cl' at the beginning of any function call with `dCL.' and add a final parameter `{}'. However, not all functions have currently been implemented and some will not work.
+
+% subsection coding_with_distributedcl (end)
+% section usage (end)
+
+\end{document}

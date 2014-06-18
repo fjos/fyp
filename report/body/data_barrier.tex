@@ -25,21 +25,20 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
     \lstset{language=cpp}  
     \begin{lstlisting}[tabsize=2]
-        template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context)
-        {
-          data_size = size_x;
-          if(data_size % granularity!= 0)
-            std::runtime_error("Error, data_size % granularity must equal 0");
-          number_chunks = size_x / granularity;
-          chunk_size = granularity;
-          message_tag = tag_value;
-          machine_id = id;
-          shared_machine_list = machines;
-          data = new data_type[data_size];
-          previous_data = new data_type[data_size];
-          context = input_context;
-        }
-
+template <typename data_type> data_barrier<data_type>::data_barrier(const init_list &machines, int size_x, int granularity, int tag_value, int id, cl_context input_context)
+{
+  data_size = size_x;
+  if(data_size % granularity!= 0)
+    std::runtime_error("Error, data_size % granularity must equal 0");
+  number_chunks = size_x / granularity;
+  chunk_size = granularity;
+  message_tag = tag_value;
+  machine_id = id;
+  shared_machine_list = machines;
+  data = new data_type[data_size];
+  previous_data = new data_type[data_size];
+  context = input_context;
+}
       \end{lstlisting}
 
     \caption{data\_barrier Constructor}
@@ -58,16 +57,15 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
       \lstset{language=cpp}  
       \begin{lstlisting}[tabsize=2]
+//templated class for float and int barriers
+data_barrier<float> float_barrier_templated = data_barrier<float>(machines, size_x, granularity, tag_value, id,  input_context);
 
-        //templated class for float and int barriers
-        data_barrier<float> float_barrier_templated = data_barrier<float>(machines, size_x, granularity, tag_value, id,  input_context);
+data_barrier<int> int_barrier_templated = data_barrier<int>(machines, size_x, granularity, tag_value, id,  input_context);
 
-        data_barrier<int> int_barrier_templated = data_barrier<int>(machines, size_x, granularity, tag_value, id,  input_context);
+//non templated classes for float and int barriers
+float_data_barrier float_barrier = float_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
 
-        //non templated classes for float and int barriers
-        float_data_barrier float_barrier = float_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
-
-        int_data_barrier int_barrier = int_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
+int_data_barrier int_barrier = int_data_barrier(machines, size_x, granularity, tag_value, id,  input_context);
         \end{lstlisting}
 
       \caption{The Difference Between Templated and Generic Classes}
@@ -86,21 +84,21 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
       \lstset{language=cpp}  
       \begin{lstlisting}[tabsize=2]
-        // Functions for each data type
-        void arrayFunc(int array[]){};
-        void vectorFunc(std::vector<int> vec){};
-        void initlistFunc(std::initializer_list<int> &initlist){};
+// Functions for each data type
+void arrayFunc(int array[]){};
+void vectorFunc(std::vector<int> vec){};
+void initlistFunc(std::initializer_list<int> &initlist){};
 
-        // An array
-        int myArray[3] = {1,2,4};
-        arrayFunc(myArray);
+// An array
+int myArray[3] = {1,2,4};
+arrayFunc(myArray);
 
-        // A vector (inline declaration allowed as of C++11)
-       std::vector<int> vec = {1, 2, 4};
-       vectorFunc(vec);
+// A vector (inline declaration allowed as of C++11)
+std::vector<int> vec = {1, 2, 4};
+vectorFunc(vec);
 
-       // initializer_list
-       initlistFunc({1,2,4});
+// initializer_list
+initlistFunc({1,2,4});
         \end{lstlisting}
 
       \caption{Initalizer Lists vs Arrays and Vectors}
@@ -175,9 +173,21 @@ The first aspect of the data\_barrier class that will be examined at are its dat
         \draw[transfer arrow right] (M-5-7) to (M-7-5);
       \end{tikzpicture}
 
+
       \caption{Data Transfer Granularity Assurance}
       \label{fig:data_transfer_chunk_guarantee}
-    \end{figure}
+      \end{figure}
+
+      It should be noted, however, that there is a limitation to the amount of granularity available. The graph in Figure~\ref{fig:message_overhead} was produced by Douglas Doerfler and Ron Brightwell in their paper ``Measuring MPI Send and Receive Overhead and Application Availability in High Performance Network Interfaces'' \cite{mpioverhead}.
+
+      \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.95\textwidth]{diagrams/message_overhead.png}
+        \caption{MPI Message Overhead}
+        \label{fig:message_overhead}
+      \end{figure}
+
+    In it you can see the overhead required for an Isend for various test platforms. Although non of these applications utilize OpenMPI as their MPI distribution, whereas my project does, the point still stands that sending data can incur a significant overhead. For the most part, it seems best to aim for a chunk size of 8 kilobytes, where you achieve the best balance between overhead and data sent. In future work, validating these expectations experimentally would be worthwhile.
   % subsubsection int_granularity (end)
 
   \subsubsection{int tag\_value} % (fold)
@@ -194,15 +204,6 @@ The first aspect of the data\_barrier class that will be examined at are its dat
   \label{ssub:cl_context_context}
     Finally, we have the cl\_context. This variable was not always included, until the final decision on how events were supposed to work was made. Because the desire was to ensure proper ordering of instructions using only OpenCL events, it was important to include this value. In order to create an event in OpenCL, one must supply a cl\_context for the event. As the various send and receive commands rely upon the creation of cl\_events, it was important to have a simple way to produce these events without needlessly supplying the context repeatedly.
   % subsubsection cl_context_context (end)
-
-  \subsubsection{cl\_mem buffer} % (fold)
-  \label{ssub:cl_mem_buffer} 
-
-  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-    This is notable for the fact that is, in fact, not included. Although it would be possible to associate any given barrier object with a cl\_mem object, it was decided that, in the end, it would not be worthwhile. To explain this reasoning, we'd first look at the situation where this would be important.
-
-    If there were to be a cl\_mem object associated with the data\_barrier, it would be useful because it could allow the command clEnqueueCopyBuffer to be used to pass data directly between GPUs on different machines. At first glance, this seems as if it would be ideal; a simple call to copy a buffer, data gets taken from the GPU, transfered between machines, and then placed once more onto a machine. The problem with this is that it would ultimately encourage poor design decisions, in addition to reducing the choices for buffers. 
-  % subsubsection cl_mem_buffer (end)
 
   Thus by examining the constructor, we have seen how all the user provided components tie in to creating all the underlying members of the data\_barrier class. From the members meant to help data transference to the actual data arrays, all components have been covered. Having provided this, we will move on to the functions provided by data\_barrier for the actual transference of data.
 % subsection data_members (end)
@@ -420,41 +421,41 @@ The first aspect of the data\_barrier class that will be examined at are its dat
       \centering
       \lstset{language=cpp}  
       \begin{lstlisting}[tabsize=2]
-        if(machine_id == send_machine)
-        {
-          std::vector<int> chunks_changed;
-          ...
-          if(chunk_has_changed)
-            chunks_changed.push_back(chunk_id);
-          ...
+if(machine_id == send_machine)
+{
+  std::vector<int> chunks_changed;
+  ...
+  if(chunk_has_changed)
+    chunks_changed.push_back(chunk_id);
+  ...
 
-          int number_chunks = chunks_changed.size();
-          // Send number of chunks to send
-          ierr = MPI_Isend(&number_chunks, 1, MPI_INT, recv_machine, 0, MPI_COMM_WORLD, &event_send.back());
+  int number_chunks = chunks_changed.size();
+  // Send number of chunks to send
+  ierr = MPI_Isend(&number_chunks, 1, MPI_INT, recv_machine, 0, MPI_COMM_WORLD, &event_send.back());
 
-          ierr = MPI_Isend(&chunks_changed[0], number_chunks, MPI_INT, recv_machine, 0, MPI_COMM_WORLD, &event_send.back());
+  ierr = MPI_Isend(&chunks_changed[0], number_chunks, MPI_INT, recv_machine, 0, MPI_COMM_WORLD, &event_send.back());
 
-          while(!chunks_changed.empty())
-          {
-            chunk_id = chunks_changed.back();
-            chunks_changed.pop_back();
-            ierr = MPI_Isend(data+chunk_id*chunk_size, chunk_size, MPI_INT, recv_machine, chunk_id, MPI_COMM_WORLD, &event_send.back());
-          }
-        }
-        else if (machine_id == recv_machine)
-        {
-          int number_chunks;
-          MPI_Status status;
-          ierr = MPI_Recv(&number_chunks, 1, MPI_INT, send_machine, 0, MPI_COMM_WORLD, &status);
-          std::vector<int> chunks_changed(number_chunks);
-          ierr = MPI_Recv(&chunks_changed[0], number_chunks, MPI_INT, send_machine, 0, MPI_COMM_WORLD, &status);
-          while(!chunks_changed.empty())
-          {
-            chunk_id = chunks_changed.back();
-            chunks_changed.pop_back();
-            ierr = MPI_Recv(data+chunk_id*chunk_size, chunk_size, MPI_INT, send_machine, chunk_id, MPI_COMM_WORLD, &status);
-          }       
-        }
+  while(!chunks_changed.empty())
+  {
+    chunk_id = chunks_changed.back();
+    chunks_changed.pop_back();
+    ierr = MPI_Isend(data+chunk_id*chunk_size, chunk_size, MPI_INT, recv_machine, chunk_id, MPI_COMM_WORLD, &event_send.back());
+  }
+}
+else if (machine_id == recv_machine)
+{
+  int number_chunks;
+  MPI_Status status;
+  ierr = MPI_Recv(&number_chunks, 1, MPI_INT, send_machine, 0, MPI_COMM_WORLD, &status);
+  std::vector<int> chunks_changed(number_chunks);
+  ierr = MPI_Recv(&chunks_changed[0], number_chunks, MPI_INT, send_machine, 0, MPI_COMM_WORLD, &status);
+  while(!chunks_changed.empty())
+  {
+    chunk_id = chunks_changed.back();
+    chunks_changed.pop_back();
+    ierr = MPI_Recv(data+chunk_id*chunk_size, chunk_size, MPI_INT, send_machine, chunk_id, MPI_COMM_WORLD, &status);
+  }       
+}
         \end{lstlisting}
 
       \caption{Asynchronous Send and Receive for Arbitrary Chunks with Reduced Number of Messages}
@@ -508,7 +509,6 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
     The threads spawned are detached, so they complete in their own time, with one caveat; the event generated must be waited for to complete. The reason for this is MPI fails if requests to send data are called after the MPI\_Finalize function is called, and the thread may continue to run even after the main body completes. It is up to the user to ensure that the send or receive completes before the program terminates.
 
-
     \begin{figure}[htbp]
       \centering
       \begin{sequencediagram}
@@ -542,9 +542,9 @@ The first aspect of the data\_barrier class that will be examined at are its dat
 
 \subsection{Thoughts} % (fold)
 \label{sub:thoughts}
-  The data\_barrier class is complete. All the possible situations that might be encountered for a send and receive were considered, and it works as expected and quite well.
+  The data\_barrier class and its underlying methods are, for the most part, complete. Functionally it does everything it sets out to do, and does so well. With a send that blocks both before and after sending, and one that blocks only after, there is a suite of functions provided for the production of various distributed OpenCL functions.
 
-  With a send that blocks both before and after sending, and one that blocks only after, there is a suite of functions provided for the production of various distributed OpenCL functions.
+  Apart from possible future changes that change data\_barrier to be a replacement for a OpenCL buffer, any changes would not modify functionality.
 % subsection thoughts (end)
 
 \label{sub:data_barrier_class}

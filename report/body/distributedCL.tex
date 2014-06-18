@@ -89,7 +89,7 @@ data_barrier<data_type> distributedCL::CreateBarrier(int size_x, int granularity
 
         As we've now discussed the way tags are determined, we can discuss a bit more on how exactly tags are determined for a send. Essentially, it's what we've mentioned: tag\_value + chunk\_id or appropriate offset. There is just one small addition; using the target and source machine's machine\_id multiplied by two predefined values, we can ensure that there is no contesting of tag values during sends. 
         
-        Additionally, because there is a limitation to the granularity that can be assured (MPI communication functions do have an overhead, and transferring in too many chunks leads to a noticeable slowdown), there is no danger of tags reaching the size of the offset provided by the machine\_ids.
+        Additionally, because there is a limitation to the granularity that can be assured, there is no danger of tags reaching the size of the offset provided by the machine\_ids.
 
         The only current issue is if multiple sends occur between the same two machines. Future work will involve a send cycle, allowing any number of sends to take place at the same time.
     % subsubsection tags (end)
@@ -305,6 +305,8 @@ err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, cb, &b
                 \label{fig:receive_and_wait}
             \end{figure}
 
+            What this means is that this enqueue command has been extended to function upon multiple machines, functioning without deadlocks or blocking of any kind.
+
             If the source machine is a targeted machine, it simply calls clEnqueueWriteBuffer. If a receive event has been provided, it is used as the event parameter for clEnqueueWriteBuffer, as seen in the figure.
         % paragraph clenqueuewritebuffer (end)
 
@@ -385,12 +387,13 @@ err = internal_send(barrier,
 
             In this, a cl\_event is created, but not initialized. It is then passed as the event to be returned from clEnqueueReadBuffer, and passed into an internal send function. This is the same as is done in write, however this send takes an additional parameter; a cl\_event known as `lock'. It then uses the send function mentioned in data\_barrier that waits for the lock to complete before sending. Upon the completion of the lock event, the send proceeds as normal, returning events in the same way as write.
 
+            Thus EnqueueReadBuffer is non blocking, and sends the correct data upon completion.
+
             From the receive side, it simply returns the recv\_event as the actual cl\_event set by the receiving thread. This is in contrast to the write, which used it as the event wait list for the actual write command.
         % paragraph clenqueuereadbuffer (end)
     
     % subsubsection methods_involving_data_transfer (end)
 
 % subsection modified_opencl (end)
-
 % section distributedcl (end)
 \end{document}
