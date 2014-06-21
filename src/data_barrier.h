@@ -45,8 +45,7 @@ public:
     cl_context context;
 
     data_barrier() {};
-    data_barrier(const init_list &machines, int size_x, int granularity,
-                 int tag_value, int id);
+    data_barrier(const init_list &machines);
     data_barrier(const init_list &machines, int size_x, int granularity,
                  int tag_value, int id, cl_context input_context);
 
@@ -75,19 +74,11 @@ public:
 };
 
 template <typename data_type>
-data_barrier<data_type>::data_barrier(const init_list &machines, int size_x,
-                                      int granularity, int tag_value, int id)
+data_barrier<data_type>::data_barrier(const init_list &machines)
 {
-    data_size = size_x;
-    if (data_size % granularity != 0)
-        std::runtime_error("Error, data_size % granularity must equal 0");
-    number_chunks = size_x / granularity;
-    chunk_size = granularity;
-    message_tag = tag_value;
-    machine_id = id;
     shared_machine_list = machines;
-    data = new data_type[size_x];
-    previous_data = new data_type[size_x];
+    data = new data_type[0];
+    previous_data = new data_type[0];
 }
 
 template <typename data_type>
@@ -96,6 +87,8 @@ data_barrier<data_type>::data_barrier(const init_list &machines, int size_x,
                                       cl_context input_context)
 {
     data_size = size_x;
+    if (data_size % granularity != 0)
+        std::runtime_error("Error, data_size % granularity must equal 0");
     number_chunks = size_x / granularity;
     chunk_size = granularity;
     message_tag = tag_value;

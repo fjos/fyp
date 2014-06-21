@@ -201,7 +201,7 @@ data_barrier<data_type> distributedCL::CreateBarrier(
         return data_barrier<data_type>(target_machines, size_x, granularity,
                                        temp_tag_value, world_rank, context);
     }
-    return data_barrier<data_type>();
+    return data_barrier<data_type>(target_machines);
 }
 
 template <typename data_type>
@@ -481,6 +481,13 @@ cl_int distributedCL::EnqueueReadBuffer(
         err = clEnqueueReadBuffer(command_queue, buffer, blocking_read, offset, cb,
                                   &barrier->data[barrier_offset], 0, NULL,
                                   lock.get());
+
+        if(recv_event!=NULL)
+        {
+          recv_event->size = 1;
+          recv_event->events = new std::shared_ptr<cl_event>[1];
+          recv_event->events[0] = lock;
+        }
 
         if (send_event != NULL)
         {
@@ -816,7 +823,7 @@ void check_source_and_target_valid(init_list shared_machine_list,
     }
     if (!world_rank_in_list(shared_machine_list, source_machine))
     {
-        throw std::runtime_error("Source machine does not share memory barrier.");
+       throw std::runtime_error("Source machine does not share memory barrier.");
     }
 
     if (!valid_target)
