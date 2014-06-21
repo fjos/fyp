@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
     // Transfer the input vector into device memory
     distCL_event receive_event, kernel_event, read_event;
 
-    printf("Machine %d EnqueueWriteBuffer\n", distributedCL.world_rank);
+    printf("Machine %d called EnqueueWriteBuffer\n", distributedCL.world_rank);
     err = distributedCL.EnqueueWriteBuffer(commands,
                                            input,
                                            CL_FALSE,
@@ -209,7 +209,7 @@ int main(int argc, char *argv[])
     // Execute the kernel over the vector using the
     // maximum number of work group items for this device
     global = count;
-    printf("Machine %d EnqueueNDRangeKernel\n", distributedCL.world_rank);
+    printf("Machine %d called EnqueueNDRangeKernel\n", distributedCL.world_rank);
     err = distributedCL.EnqueueNDRangeKernel(commands, kernel,
                                              1, NULL, &global, &local,
                                              0, NULL, NULL, {});
@@ -271,6 +271,8 @@ int main(int argc, char *argv[])
 
         distributedCL.WaitForEvents(1, &async_event, { 1, 2 });
         printf("Machine %d completed second EnqueueReadBuffer\n", distributedCL.world_rank);
+
+        clReleaseCommandQueue(command2);
     }
 
     printf("Machine %d waiting for first EnqueueReadBuffer\n", distributedCL.world_rank);
@@ -292,12 +294,9 @@ int main(int argc, char *argv[])
     }
 
     // Print a brief summary detailing the results
-    cout << "Computed " << correct << "/" << DATA_SIZE << " correct values on " << distributedCL.world_rank << endl;
-    cout << "Computed " << 100.f * (float)correct / (float)DATA_SIZE
-         << "% correct values" << endl;
-
-    // Shutdown and cleanup
-    // delete [] data; delete [] results;
+    // cout << "Computed " << correct << "/" << DATA_SIZE << " correct values on " << distributedCL.world_rank << endl;
+    // cout << "Computed " << 100.f * (float)correct / (float)DATA_SIZE
+    //      << "% correct values" << endl;
 
     clReleaseMemObject(input);
     clReleaseMemObject(output);
