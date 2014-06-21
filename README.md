@@ -24,7 +24,7 @@ found at <http://www.open-mpi.org/>.
 
 Samples
 -------
-Some samples are included in the repository.
+Some samples are included in the repository under src/samples
 
 To run them, they must first be compiled with with both OpenMPI and OpenCL, then run as followed
 
