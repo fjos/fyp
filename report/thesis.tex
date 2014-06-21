@@ -1,6 +1,6 @@
 
-\documentclass[a4paper,12pt,twoside]{report}
-\usepackage[left=2cm,right=2cm,top=2cm,bottom=3cm]{geometry}
+\documentclass[a4paper,twoside]{report}
+% \usepackage[left=2cm,right=2cm,top=2cm,bottom=3cm]{geometry}
 
 \include{thesis.preamble}
 
@@ -12,14 +12,15 @@
 
 \subfile{abstract/abstract.tex}
 \subfile{acknowledgements/acknowledgements.tex}
-\subfile{dedication/dedication.tex}
-\subfile{quotes/quotes.tex}
+% \subfile{dedication/dedication.tex}
+% \subfile{quotes/quotes.tex}
 
 \body
 
 \subfile{introduction/introduction.tex}
 
-\chapter{distributedCL}
+\chapter{distributedCL, an API for Distributed Computing With OpenCL}
+In this section we will discuss the implementation and development of distributedCL, an API for distributed computing utilizing OpenCL. We will start by examining the data\_barrier class, the basis for sharing data between machines. From their we move to distCL\_event, an event that allows for event-driven programming in a distributed OpenCL program. Then we will discuss the distributedCL class, which contains the implementations for all the distributed versions of OpenCL functions. Finally, we will briefly look at how to use distributedCL; the requirements both for running programs based on it, as well as writing programs with it.
 \subfile{body/data_barrier.tex}
 \subfile{body/distCL_event.tex}
 \subfile{body/distributedCL.tex}

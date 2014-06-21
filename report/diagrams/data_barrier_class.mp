@@ -6,7 +6,7 @@ beginfig(1);
             "number_chunks: int",
             "init_list: shared_machine_list",
             "message_tag: int",
-            "machine_id: int",
+            "machine_rank: int",
             "data: data_type *",
             "previous_data: data_type *",
             "context: cl_context",)

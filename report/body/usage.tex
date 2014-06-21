@@ -9,7 +9,7 @@ distributedCL has been tested on OS X 10.9.3, as well as Ubuntu 12.04 LTS.
 
 It has been tested using OpenCL v1.2, and OpenMPI v1.8.1.
 
-Most of the information and source code will be available soon at the github repo \url{https://github.com/fjos/fyp}.
+This information and source code will be available soon at the github repository \url{https://github.com/fjos/fyp}.
 
 \subsection{OpenCL} % (fold)
 \label{sub:opencl_use}
@@ -22,7 +22,7 @@ Most of the information and source code will be available soon at the github rep
 
 \subsection{Coding with distributedCL} % (fold)
 \label{sub:coding_with_distributedcl}
-    OpenCL code can be almost directly transcribed to distributedCL code, with a few caveats.
+    After including ``distributedCL.h'', OpenCL code can be almost directly transcribed to distributedCL code, with a few caveats.
     \begin{enumerate}
     \item A distributedCL program must always start with the construction of an instance of the distributedCL class (at least before any other distributedCL functions can be called)
     \item A distributedCL program must always terminate with a call to distributedCL::Finalize

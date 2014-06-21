@@ -45,23 +45,24 @@
 
         As can be seen, either an explicit call to clWaitForEvents can be made, or the event\_wait\_list can be passed directly to the enqueue function.
 
-        Although there are other methods for synchronization, such as clEnqueueBarrier (all commands in the queue prior to this will block until completion), this was chosen as the most robust and as such was the basis for all synchronization within distributedCL.
+        Although there are other methods for synchronization, such as clEnqueueBarrier (all commands in the queue prior to this will block until completion), this was chosen as the most robust and as such was the basis for all synchronization within distributedCL. Additionally, in order to maintain similarity to the OpenCL model, it was important to include some form of event.
     % subsection opencl_event_model (end)
 
     \subsection{distCL\_event Design} % (fold)
     \label{sub:distcl_event_design}
         Once it was decided that events would be used for synchronization, it was then just a matter of designing and building events. The first step was choosing how events should be represented. At this point, there were a few ways to go. It seemed natural to base the send and receive event on a std::vector of MPI\_Requests. When it came time to ensure their completion, it would be a matter of iterating through and calling MPI\_Wait on each. Additionally, it would need to handle OpenCL events (cl\_event). 
+
         \subsubsection{distCL\_event First Iteration} % (fold)
         \label{ssub:distcl_event_first_iteration}
             Thus the first distCL\_event was a structure containing three components; an integer containing the enumeration specifying what type of event this distCL\_event was associated (an MPI or CL event), a std::vector<MPI\_Request> and a cl\_event. The clWaitForEvents method was replaced with a method WaitForEvents() that checked the event type, and called the method appropriate for handling it.
 
             When it came time to thread the receive function, it was realized that the usage of a vector to contain the MPI\_Requests was no longer feasible; vectors were not thread safe. When a vector is modified by push\_back() there is a chance of reallocation, should that happen the data is invalidated. This was a very real worry, and as such it was decided to change. Although there was the possibility of switching to a std::list which neatly sidesteps the problem of reallocation, the problem still would not be solved.
 
-            This can easily be imagined; if WaitForEvents was called prior to the all the calls to MPI\_Recv, there is a chance that the entire list would be consumed prior to properly adding all the MPI\_Request. Thus although WaitForEvents would return successfully, there was no guarantee that all of the receives would have completed.
+            This can easily be imagined; if WaitForEvents was called prior to the MPI\_Irecv loop completing, there is a chance that the entire event list would before all the receive calls were made. Thus although WaitForEvents would return successfully, there was no guarantee that all of the receives would have completed.
 
-            As at the time I was still unaware of MPI\_Request leakage, and the fact that MPI\_Wait had to be called on all the MPI\_Isend requests, the distCL\_event was split into two unique event types; an MPI\_Send type and an MPI\_Recv type. The send event was still a vector of MPI\_Requests, the receive event was now a vector of thread ids, containing the std::thread id associated with a thread upon it's creation.
+            The distCL\_event was split into two unique event types; a send type and an receive type. As at the time I was still unaware of the fact that MPI\_Wait had to be called on all nonblocking requests or suffer from memory leaks, the send event was a vector of MPI\_Requests. The receive event had now been changed to a vector of thread ids, containing the std::thread id associated with a thread upon it's creation.
 
-            Now, the event handling determined if it was one of three types of event, called MPI\_Wait for the sends, clWaitForEvent for the cl\_events, and thread.join for the receive events. It was getting out of control, the events were getting far more complex than necessary and there was no unified way of dealing with them. The structure of a distCL\_event at this stage can be seen in Figure~\ref{fig:distCL_event_uml_original}, and it was a slight mess.
+            Now, the event handling determined if it was one of three types of event and called the appropriate handling function; MPI\_Wait for the sends, clWaitForEvent for the cl\_events, and thread::join for the receive events. It was getting out of control, the events were getting far too and there was no unified way of dealing with them. The structure of a distCL\_event at this stage can be seen in Figure~\ref{fig:distCL_event_uml_original}, and it was a slight mess.
 
             \begin{figure}[htbp]
                 \centering
@@ -74,13 +75,13 @@
         
         \subsubsection{distCL\_event Current Design} % (fold)
         \label{ssub:distcl_event_current_design}
-            When it came time to integrate sends and receives with actual OpenCL code, it was very difficult to do so. The tipping point was actually the creation of a distributed clEnqeueueWriteBuffer. A call to enqueue a write buffer was important, because if a write was enqueued from a separate machine, the data had to be sent across a network prior to allowing for use. Thus, clEnqueueWriteBuffer could not execute until the receive event was completed, and as it was there was no way to implement that. Unless the complexity was increased even more by calling clEnqueueWriteBuffer within it's own thread, the distCL\_event could no longer stay the same way.
+            When it came time to integrate sends and receives with actual OpenCL code, it was very difficult to do so. The tipping point was actually the creation of a distributed clEnqeueueWriteBuffer. A call to enqueue a write buffer was important, because if a write was enqueued from a separate machine, the data had to be sent across a network prior to allowing for use. Thus, clEnqueueWriteBuffer could not execute until the receive event was completed, and as it was there was no way to implement that. Unless the complexity was increased even more by calling clEnqueueWriteBuffer within it's own thread (additionally creating a reverse dependency between the classes), the distCL\_event could no longer stay the same way.
 
             The solution was OpenCL user events. As previously discussed, OpenCL enqueue methods accept cl\_event lists, and this allowed to ensure the proper ordering of the receive and enqueue, without sacrificing the ability to execute the rest of the commands out of order.
 
             This was accomplished using std::shared\_ptrs and cl\_events. First, the reasoning behind shared\_ptrs. One of the problems that was encountered  with threaded sends, was that a send would start as soon as it called, and in certain situations this was undesirable behavior. It would be ideal if the thread would wait on a cl\_event created by an enqueue method prior to attempting to send (this situation can be seen within EnqueueReadBuffer with the provided code). 
 
-            When this was implemented without a std::shared\_ptr, problems would be encountered where the cl\_event would fall out of scope before clWaitForEvents could be called, thus calling clWaitForEvents on an arbitrary chunk of memory. Shared pointers allow multiple threads to access the same data; keeping track of how many instances of the pointer exist and only freeing the underlying memory when all fall out scope. By using shared\_ptrs there was an assurance that all threads and OpenCL calls would be dealing with the same piece of data.
+            When this was implemented without a std::shared\_ptr, problems would be encountered where the cl\_event would fall out of scope before clWaitForEvents could be called, thus calling clWaitForEvents on an arbitrary chunk of memory. Shared pointers allow multiple threads to access the same data; keeping track of how many instances of the pointer exist and only freeing the underlying memory when all fall out scope. By using shared\_ptrs there was an assurance that all threads and OpenCL calls would be dealing with the same piece of data, and that the data would exist until it was no longer needed.
 
             Some events, such as send events, require multiple cl\_events, one per machine being sent to. As such, a single distCL\_event may have to hold multiple cl\_events. This led to the final design of a distCL\_event; an array of std::shared\_ptrs of cl\_events. This can be seen in Figure~\ref{fig:distCL_event_uml_current}; in contrast to the original in Figure~\ref{fig:distCL_event_uml_original} it is far simpler and allows for easy implementation of all desired behavior.
             
@@ -118,7 +119,7 @@
         These functions are very similar, both in syntax and usage. And that was the goal of developing this way, to reduce the effort of adapting standard OpenCL code to a distributed system. The chief difference between these two is the final variable in the distributedCL function call, target machines. This allows for the call to only affect those machines that are targeted, but this will be discussed more in depth in the next section.
     % subsection distcl_event_usage (end)
 
-The OpenCL event model is very useful for providing synchronization and allowing machines to run independently without blocking. By keeping the principles of OpenCL's event based system, the code provided allows for easily creating complex multi machine command queues, without worrying about deadlocks. Any data dependency can easily be handled by the distCL\_event.
+The OpenCL event model is very useful for providing synchronization and allowing machines to run independently without blocking. By keeping the principles of OpenCL's event based system, the code provided allows for easily creating complex multi machine command queues, without worrying about deadlocks.
 
 % section event_based_programming (end)
 

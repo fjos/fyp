@@ -5,14 +5,16 @@
 \section{Motivation and Objectives}
     OpenCL is a standard API for parallel programming, utilized and supported by a large variety of data-parallel architectures. It is widely used for High Performance Computing (HPC) to enhance the speed of calculations that can be done in parallel.
 
-    The goal of this project is to examine solutions to, and then implement a third level of a memory hierarchy in OpenCL, where memory is shared between networked devices.
+    The goal of this project is to examine solutions to, and then implement, a third level of a memory hierarchy in OpenCL, where memory is shared between networked devices.
 
-    The normal method for achieving this is to write code using a combination of MPI and OpenCL to achieve distributed parallel computing. The problem with such an approach is it requires the programmer to be well aware of the MPI directives, and write all the memory transfers by hand, leading to more complex code. In this project we will implement an API that allows us to easily exploit distributed computation devices. We aim to do this by providing a class that when created functions as a data barrier between specified machines. We will then utilize that as the basis for data communications across machines in distributed OpenCL functions. 
+    The normal method for achieving this is to write code using a combination of MPI and OpenCL to achieve distributed parallel computing. The problem with such an approach is it requires the programmer to be well aware of the MPI directives, and write all the memory transfers by hand; this leads to complex code. In this project we will implement an API that allows us to easily exploit distributed computation devices. 
+
+    We aim to do this by first providing a class that functions as a data barrier between machines. This class will then be utilized as a base for data communications when building an API for distributed OpenCL.
 % section project_specification (end)
 
 
 \section{Background}
-    In this section we'll discuss the components utilized for this project, as well as looking at how some other projects tackled the same task.
+    In this section we'll discuss the components utilized for this project, as well as look at how some other projects tackled the same task.
 
     \subsection{OpenCL (Open Computing Language)} % (fold)
     \label{sub:opencl}
@@ -25,13 +27,17 @@
     \label{sub:openmpi}
         The Message Passing Interface (MPI) standard is a standard that ``addresses primarily the message-passing parallel programming model, in which data is moved from the address space of one process to that of another process through cooperative operations on each process''\cite{MPI-2.2}, or, in simpler terms, is a standard that primarily defines how multiple processes communicate with one another. 
 
-        Additionally, it attempts to define an interface for a simple, portable, standard for communication. Some of the precepts laid down within the MPI standard is that communication should be reliable, that it should be usable on many platforms, and that it should be efficient.
+        Additionally, it attempts to define an interface for a simple, portable, standard for communication. Some of the precepts laid down within the MPI standard are that communication should be reliable, usable on many platforms, and efficient.
 
         % Through the combined work of roughly 60 people from all across the world, a standard for message-passing was drafted and proposed in late 1992, and over time the standards have been corrected and refined. The most current standard is MPI-3.0.\cite{MPI-3.0}
 
         OpenMPI is an open source implementation of the MPI-2 standard, built from a merger between FT-MPI (University of Tennessee), LA-MPI (Los Alamos National Laboratory), and LAM/MPI (Indiana University) with the PACX-MPI team (University of Stuttgart) contributing. By combining these four implementations it was hoped that a fast, efficient MPI implementation could be built.\cite{openmpiwebsite} Additionally, it is supported by a wide variety of platforms, and is attractive in that regard as well.
 
-        This implementation of MPI will provide this project's basis for data transfers and communication between networked GPUs.
+        This implementation of MPI will provide this project's basis for data transfers and communication between networked GPUs. As such, it's important to explain some of the functions which have been provided by MPI, and will be used in the project.
+
+        The first are MPI\_Init and MPI\_Finalize. These are two calls that must be made before and after all the MPI calls, respectively. They prepare the MPI environment at the beginning, and clean it up when it ends. Going hand in hand are two functions MPI\_Comm\_rank and MPI\_Comm\_size, which will be discussed later, but provide the separate MPI processes with information required for various commands.
+
+        Next are MPI\_Send and MPI\_Recv. These are blocking calls to send and receive data, and are the basis for simple communication between processes. There are more varieties of send and receive, and the ones used heavily in this project are MPI\_Isend and MPI\_Irecv. These are nonblocking sends and receives. The send preallocate a buffer for the transmission of data, which is useful when the send begins before the receive; the overhead can be taken care of in advance. These have the requirement that they are tested for completion later on, or freed without a care for completion.
     
     \subsection{CUDA and Close To Metal} % (fold)
     \label{sub:cuda_and_close_to_metal}
@@ -57,25 +63,25 @@
     In this section we'll briefly discuss some of the solutions considered, and their pros and cons.
         \subsubsection{Disguising Distance} % (fold)
         \label{ssub:disguising_distance}
-            One possibility for implementing distributed OpenCL is to disguise the fact that compute devices are on separate nodes, and allow the OpenCL program to view all compute devices on a network as a local compute device. The advantage of this is that writing an OpenCL application for this type of an environment is trivial; all devices in a computer cluster will appear to be available locally, and all memory transfers are hidden from the user. This allows for a competent OpenCL programmer to write a program for a distributed environment with standard OpenCL API functions.
+            One possibility for implementing distributed OpenCL is to disguise the fact that compute devices are on separate nodes, and allow the OpenCL program to view all compute devices on a network as a local compute device. The advantage of this is that writing an OpenCL application in this type of an environment is trivial; all devices in a computer cluster appear to be available locally, and all memory transfers are hidden from the user. This allows a competent OpenCL programmer to write a program for a distributed environment with standard OpenCL API functions.
 
             There are, however, issues with this implementation. The chief of which is that it functions in a typical Master/Slave configuration; one machine controls what data and commands are passed, and to where. It does not easily allow for data transference between sister nodes, and thus the data flow paths are limited.
 
-            It is a solution that is ideal for most tasks where the computation simply needs to be split between machines, and has been successfully implemented by researchers at Seoul National University\cite{Kim:2012:SOF:2304576.2304623}. This solution is, however, nontrivial. As it involves such implementation complexity it was discarded, but kept in mind for future works on this project, as building a relatively similar system might be possible using this project as a base.
+            It is a solution that is ideal for most tasks where the computation simply needs to be split between machines, and has been successfully implemented by researchers at Seoul National University\cite{Kim:2012:SOF:2304576.2304623}. This solution is, however, nontrivial. As it involves such implementation complexity it was discarded as a possible approach. It will be kept in mind for future works on this project, as building a similar system could be possible using this project as a base.
         % subsubsection disguising_distance (end)
         \subsubsection{Function Wrapping} % (fold)
         \label{ssub:function_wrapping}
-            The method that will be used within this project is to create function wrappers for all the functions, defining origins and destinations for the data. Take, for example, you wish to load data from one machine onto another. Ordinarily this would involve multiple calls of MPI\_Send and MPI\_Recv in order to pass the size of the data, and then the data itself. The hope is to hide all of the sends and receives from the user, and allow them to use invocations very similar to OpenCL itself.
+            The method that will be used within this project is to create function wrappers for all the functions, defining origins and destinations for the data. Take, for example, loading data from one machine onto another. Ordinarily this would involve multiple calls of MPI\_Send and MPI\_Recv in order to transfer the data. The hope is to hide all of the sends and receives from the user, and allow them to use invocations very similar to OpenCL, without worrying about how the data is transfered.
 
-            This will require more thought on the programmers behalf, because they will need to understand how their data flows and where and when things need to execute, but it helps reduce how much thought they have to put into programming the data exchange.
+            This will require more thought on the programmers behalf, because they will need to understand how their data flows and where and when things need to execute, but it reduces how much thought they have to put into the actual data exchange.
 
-            Utilizing this method can also allow for the design of a system with a single master node, but it alone does not provide scheduling or load balancing across machines; that must be done explicitly within the code.
+            This method also allows for the design of a system with a single master node, but it does not provide scheduling or load balancing across machines; that must manually implemented by the programmer.
 
             Both this and the previous solution are only applicable to local computing, where one can control all the machines that will be running the processes.
         % subsubsection function_wrapping (end)
         \subsubsection{High Throughput Computing} % (fold)
         \label{ssub:high_throughput_computing}
-            A final thought will be given to High Throughput Computing, a type of computing meant more to take advantage of the computational power available to a large community. Also known as Opportunistic Supercomputing, it's distributed computing for problems with solution times that can more often be measured in months than in hours. It tackles the challenges of distributed computing by simply not having communication between individual devices, and simply returning results to the main system. Although some thought was given to implementing a framework for this, it is less measurable without a large community backing it, and proven solutions exist that have already implemented OpenCL\cite{boinc}. 
+            A final thought will be given to High Throughput Computing; a type of computing meant to take advantage of the computational power available to a large community. Also known as Opportunistic Supercomputing or grid computing, it's distributed computing for problems with solution times that can more often be measured in months than in hours. It tackles the challenges of distributed computing by simply not having communication between individual devices, and simply returning results to the main system. Although some thought was given to implementing a framework for this, it is less measurable without a large community backing it, and proven solutions, such as BOINC, exist that have already implemented OpenCL\cite{boinc}. 
         % subsubsection high_throughput_computing (end)
     % subsection methodology_considered (end)
 \end{document}

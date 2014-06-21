@@ -91,6 +91,8 @@ Currently some of OpenCL functions do not have distributedCL equivalents; this i
 
 All distributedCL functions currently require a parameter target\_machines, and treat an empty list as all machines. In the future, I'd like to provide an overloaded function without the last parameter that default to all machines.
 
+This is another small thing, but it would be ideal to consolidate the project into a single file. As it stands, it's divided among four files, and would be made more convenient to turn it into a single header file.
+
 Another change that would be ideal is thread tracking. As it is, send and receive threads need to either be blocking calls, or have WaitForEvent called for the produced event prior to the call to Finalize. This is because oftentimes MPI\_Finalize will be called by the main thread prior to the send thread finishing the transmission, which leads to errors and poor behavior. By implementing a data member of distributedCL that keeps track of threads, we can became more lax on send and receive completion in functions.
 
 A large change that was not yet implemented is clEnqueueCopyBuffer, and all the changes that implementing it would entail. As far as sending and receiving goes, it stands to reason that the send half would be quite similar to the EnqueueReadBuffer, and the receive half would just be EnqueueWriteBuffer. But it would require quite a few changes to data\_barrier, such as changing it to be a wrapper for a cl\_mem object, (acl\_mem is a handle to a buffer created by clCreateBuffer). In this situation, a data\_barrier would always be passed in place of a buffer object. The only reason it hasn't been implemented is lack of time to overhaul the data\_barrier class and the functions that use it.
