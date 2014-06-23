@@ -28,7 +28,9 @@ Some samples are included in the repository under src/samples
 
 To run them, they must first be compiled with with both OpenMPI and OpenCL, then run as followed
 
-1. **nonblocking\_communication:** This must be run with at least three processes. A sample command to run it locally would be "mpirun -n 3 ./bin/nonblocking_communication"
+1. **nonblocking\_communication:** This must be compiled with MPI and run with at least three processes. A sample command to run it locally would be "mpirun -n 3 ./bin/nonblocking_communication". See code for citations.
+
+2. **heat\_simulation:** Based on the code provided by Dr. D.B. Thomas for his High Performance Computing course. The step world function has been modified to support distributed computing. More information can be found in the makefile included in this sample.
 
 Coding with distributedCL
 -------------------------

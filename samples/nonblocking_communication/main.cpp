@@ -13,6 +13,8 @@
 // https://developer.apple.com/library/mac/samplecode/OpenCL_Hello_World_Example
 // using error checking from Code Project's OpenCL tutorial available at
 // http://www.codeproject.com/Articles/110685/Part-OpenCL-Portable-Parallelism
+//-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
 
 
 #include <unistd.h>
